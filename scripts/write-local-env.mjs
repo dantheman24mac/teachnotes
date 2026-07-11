@@ -11,6 +11,8 @@ const contents = [
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${status.PUBLISHABLE_KEY ?? status.ANON_KEY}`,
   `SUPABASE_SERVICE_ROLE_KEY=${status.SECRET_KEY ?? status.SERVICE_ROLE_KEY}`,
   "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+  "TEACHNOTES_LOGIN_USERNAME=tutor",
+  "TEACHNOTES_LOGIN_EMAIL=tutor@teachnotes.local",
   "DEMO_MODE=false",
   "",
 ].join("\n");

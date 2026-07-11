@@ -1,0 +1,10 @@
+services:
+  kong:
+    networks:
+      - default
+      - teachnotes
+
+networks:
+  teachnotes:
+    external: true
+    name: teachnotes

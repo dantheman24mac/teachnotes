@@ -10,10 +10,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "supabase:start": "supabase start -x edge-runtime,imgproxy,logflare,postgres-meta,realtime,studio,supavisor,vector",
+    "supabase:start": "supabase start -x edge-runtime,imgproxy,logflare,mailpit,postgres-meta,realtime,studio,supavisor,vector",
     "supabase:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "env:local": "node scripts/write-local-env.mjs",
+    "auth:create-owner": "node scripts/create-owner.mjs",
     "dev:up": "npm run supabase:start && npm run env:local && docker compose --env-file .env.local up --build web",
     "dev:down": "docker compose --env-file .env.local down && npm run supabase:stop"
   },

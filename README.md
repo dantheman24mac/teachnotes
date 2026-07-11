@@ -1,10 +1,10 @@
 # TeachNotes
 
-TeachNotes is an offline-friendly lesson, attendance, student and invoice manager for an independent tutor. It uses Next.js 16, TypeScript, Supabase and Docker, with a standalone image suitable for a future Railway deployment.
+TeachNotes is an offline-friendly lesson, attendance, student and invoice manager for an independent tutor. It uses Next.js 16, TypeScript, Supabase and Docker. The production target is a Raspberry Pi behind Cloudflare Tunnel.
 
 ## What is included
 
-- Magic-link authentication with server-side session cookies.
+- Private username/password authentication with server-side Supabase sessions.
 - Today agenda with quick attendance and note capture.
 - IndexedDB lesson cache, offline outbox, idempotent sync and visible conflict resolution.
 - Student-specific fixed duration/price defaults and future-lesson updates.
@@ -19,16 +19,20 @@ Prerequisites: Node.js 22+, npm and Docker Desktop.
 
 ```bash
 npm install
-npm run dev:up
+npm run supabase:start
+npm run env:local
+npm run auth:create-owner
+npm run dev
 ```
 
-The first run downloads the official Supabase images, applies the migrations, creates `.env.local`, builds the web container and opens these services:
+The setup commands download the local Supabase images, apply migrations and create `.env.local`. The owner command prompts for a password without storing it in the environment file. Local defaults use username `tutor` and the private backing email `tutor@teachnotes.local`.
+
+The development services are:
 
 - App: <http://localhost:3000>
-- Captured magic-link email: <http://localhost:54324>
 - Supabase API: <http://localhost:54321>
 
-Enter an email on the sign-in screen, then open Mailpit to follow the local magic link. Stop everything with:
+After the owner exists, `npm run dev:up` can start the complete containerized development environment. Stop everything with:
 
 ```bash
 npm run dev:down
@@ -46,6 +50,7 @@ npm test             # pricing and recurrence unit tests
 npm run test:e2e     # desktop/mobile browser workflows
 npm run db:reset     # rebuild local database from migrations
 npm run env:local    # refresh .env.local from Supabase status
+npm run auth:create-owner # create the configured owner with a prompted password
 ```
 
 ## Architecture notes
@@ -57,6 +62,8 @@ npm run env:local    # refresh .env.local from Supabase status
 - Money is stored in integer cents and each lesson snapshots a fixed amount. Duration changes never prorate the amount automatically.
 - A partial unique database index prevents one lesson from appearing in two active finalized invoices.
 
-## Railway later
+## Raspberry Pi production
 
-The root `Dockerfile` produces a non-root Next.js standalone server with `/api/health`. On Railway, deploy the app from this Dockerfile, set the environment variables from a managed Supabase project, and use `SUPABASE_INTERNAL_URL` only when Railway can reach Supabase at a different private address than the browser-facing URL.
+The root `Dockerfile` produces a non-root ARM64-compatible Next.js standalone server with `/api/health`. The Pi deployment runs the official self-hosted Supabase Docker stack and joins its Kong gateway to a private `teachnotes` Docker network. Cloudflare Tunnel publishes only the Next.js app and Supabase API hostnames; no inbound router or database ports are opened.
+
+See [deploy/pi/README.md](deploy/pi/README.md) for the topology, environment templates, startup sequence and local backup procedure. Railway remains a compatible later option because the web container is stateless and continues to use standard Supabase URLs.
