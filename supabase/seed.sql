@@ -1,0 +1,2 @@
+-- Application records are user-owned and are created after the first magic-link sign-in.
+-- The web app provides representative demo records whenever Supabase is not configured.
