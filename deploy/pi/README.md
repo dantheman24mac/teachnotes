@@ -4,8 +4,8 @@ This deployment keeps TeachNotes, PostgreSQL, Auth, REST and invoice Storage on 
 
 ## Topology
 
-- `app.<domain>` routes through Cloudflare Tunnel to `http://web:3000`.
-- `api.<domain>` routes through Cloudflare Tunnel to `http://kong:8000`.
+- `teachnotes.fyi` routes through Cloudflare Tunnel to `http://web:3000`.
+- `api.teachnotes.fyi` routes through Cloudflare Tunnel to `http://kong:8000`.
 - `web` uses `http://kong:8000` internally to avoid a public network round trip.
 - PostgreSQL and invoice files persist under `/srv/teachnotes/supabase/volumes`.
 - Studio, PostgreSQL and all container ports remain private.
@@ -32,9 +32,9 @@ The official Supabase stack recommends at least 4 GB RAM and an SSD. Use the off
 3. Set these Supabase URLs in its private `.env`:
 
    ```dotenv
-   SUPABASE_PUBLIC_URL=https://api.<domain>
-   API_EXTERNAL_URL=https://api.<domain>/auth/v1
-   SITE_URL=https://app.<domain>
+   SUPABASE_PUBLIC_URL=https://api.teachnotes.fyi
+   API_EXTERNAL_URL=https://api.teachnotes.fyi/auth/v1
+   SITE_URL=https://teachnotes.fyi
    DISABLE_SIGNUP=true
    ENABLE_EMAIL_SIGNUP=false
    ```
