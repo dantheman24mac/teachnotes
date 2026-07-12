@@ -19,6 +19,11 @@
 
 # production
 /build
+!/build/
+!/build/sites-vite-plugin.ts
+/dist/
+/.vinext/
+/.wrangler/
 
 # misc
 .DS_Store
