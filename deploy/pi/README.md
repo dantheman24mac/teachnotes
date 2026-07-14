@@ -8,7 +8,9 @@ This deployment keeps TeachNotes, PostgreSQL, Auth, REST and invoice Storage on 
 - `api.teachnotes.fyi` routes through Cloudflare Tunnel to `http://kong:8000`.
 - `web` uses `http://kong:8000` internally to avoid a public network round trip.
 - PostgreSQL and invoice files persist under `/srv/teachnotes/supabase/volumes`.
-- Studio, PostgreSQL and all container ports remain private.
+- PostgreSQL and Supavisor bind only to loopback. Studio is protected by its
+  generated HTTP Basic Auth credentials and is reachable through the API
+  hostname until path-restricted tunnel ingress is enabled.
 
 ## Prerequisites
 
