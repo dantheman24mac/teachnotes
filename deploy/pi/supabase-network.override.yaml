@@ -1,4 +1,10 @@
 services:
+  auth:
+    environment:
+      GOTRUE_SECURITY_CAPTCHA_ENABLED: "true"
+      GOTRUE_SECURITY_CAPTCHA_PROVIDER: turnstile
+      GOTRUE_SECURITY_CAPTCHA_SECRET: ${TURNSTILE_SECRET_KEY}
+
   kong:
     ports: !override
       - "127.0.0.1:8000:8000/tcp"

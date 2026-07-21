@@ -14,20 +14,22 @@ const statuses: LessonStatus[] = ["attended", "no_show", "canceled_rescheduled"]
 export function TodayAgenda({ initialLessons, monthEarnings, completedCount, billableCount }: { initialLessons: Lesson[]; monthEarnings: number; completedCount: number; billableCount: number }) {
   const [lessons, setLessons] = useState(initialLessons);
   const [editing, setEditing] = useState<string | null>(null);
-  const { online, syncNow } = useOffline();
+  const { online, ready, syncNow, userId } = useOffline();
 
   useEffect(() => {
-    void cacheLessons(initialLessons);
+    if (!ready) return;
+    void cacheLessons(userId, initialLessons);
     if (!online && initialLessons.length === 0) {
-      void getCachedLessons().then((cached) => {
+      void getCachedLessons(userId).then((cached) => {
         const today = new Date().toDateString();
         setLessons(cached.filter((lesson) => new Date(lesson.startsAt).toDateString() === today));
       });
     }
-  }, [initialLessons, online]);
+  }, [initialLessons, online, ready, userId]);
 
   async function updateLesson(lesson: Lesson, patch: Partial<Pick<Lesson, "status" | "notes" | "billingOverride">>) {
-    const updated = await queueLessonPatch(lesson, patch);
+    if (!ready) return;
+    const updated = await queueLessonPatch(userId, lesson, patch);
     setLessons((current) => current.map((item) => item.id === lesson.id ? updated : item));
     if (online) void syncNow();
   }

@@ -1,9 +1,10 @@
 "use client";
 
-import { CalendarDays, ClipboardList, GraduationCap, Menu, ReceiptText, Settings, Users, X } from "lucide-react";
+import { CalendarDays, ClipboardList, GraduationCap, Menu, ReceiptText, Settings, ShieldCheck, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { SignOutButton } from "./sign-out-button";
 
 const links = [
   { href: "/today", label: "Today", icon: ClipboardList },
@@ -13,22 +14,24 @@ const links = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppShell({ children, demoMode }: { children: React.ReactNode; demoMode: boolean }) {
+export function AppShell({ children, demoMode, isAdmin = false, pendingUserCount = 0 }: { children: React.ReactNode; demoMode: boolean; isAdmin?: boolean; pendingUserCount?: number }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const navigationLinks = isAdmin ? [...links, { href: "/admin/users", label: "User approvals", icon: ShieldCheck }] : links;
   return (
     <div className="app-frame">
       <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
         <div className="brand"><span className="brand-mark"><GraduationCap size={22} /></span><span>TeachNotes</span></div>
         <button className="sidebar-close" type="button" onClick={() => setOpen(false)} aria-label="Close menu"><X /></button>
         <nav aria-label="Primary navigation">
-          {links.map(({ href, label, icon: Icon }) => {
+          {navigationLinks.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
-            return <Link prefetch={false} key={href} href={href} className={active ? "active" : ""} onClick={() => setOpen(false)}><Icon size={19} /><span>{label}</span></Link>;
+            return <Link prefetch={false} key={href} href={href} className={active ? "active" : ""} onClick={() => setOpen(false)}><Icon size={19} /><span>{label}</span>{href === "/admin/users" && pendingUserCount > 0 && <strong className="nav-count">{pendingUserCount}</strong>}</Link>;
           })}
         </nav>
         <div className="sidebar-foot">
           {demoMode && <span className="demo-pill">Demo data</span>}
+          {!demoMode && <SignOutButton />}
           <p>Calm admin for focused teaching.</p>
         </div>
       </aside>

@@ -1,21 +1,22 @@
 "use server";
 
-import { createHash, timingSafeEqual } from "node:crypto";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { getAccountContext } from "@/lib/auth";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
-export type LoginState = { message: string };
+export type LoginState = { message: string; resetTurnstile: number };
 
 const credentialsSchema = z.object({
-  username: z.string().trim().min(1).max(128),
+  email: z.string().trim().email().max(320),
   password: z.string().min(1).max(1024),
+  captchaToken: z.string().max(4096).optional(),
 });
 
-function matchesUsername(candidate: string, configured: string) {
-  const digest = (value: string) =>
-    createHash("sha256").update(value.trim().toLocaleLowerCase("en-ZA")).digest();
-  return timingSafeEqual(digest(candidate), digest(configured));
+function destinationFor(context: Awaited<ReturnType<typeof getAccountContext>>) {
+  if (!context?.account || context.account.status !== "approved") return "/pending";
+  if (context.account.mustChangePassword) return "/change-password";
+  return "/today";
 }
 
 export async function signInWithPassword(
@@ -23,26 +24,26 @@ export async function signInWithPassword(
   formData: FormData,
 ): Promise<LoginState> {
   const parsed = credentialsSchema.safeParse({
-    username: formData.get("username"),
+    email: formData.get("email"),
     password: formData.get("password"),
+    captchaToken: formData.get("captchaToken") || undefined,
   });
-  const configuredUsername = process.env.TEACHNOTES_LOGIN_USERNAME;
-  const configuredEmail = process.env.TEACHNOTES_LOGIN_EMAIL;
 
-  if (!isSupabaseConfigured() || !configuredUsername || !configuredEmail) {
-    return { message: "Username and password sign-in is not configured." };
+  if (!isSupabaseConfigured()) {
+    return { message: "Email and password sign-in is not configured.", resetTurnstile: _previousState.resetTurnstile + 1 };
   }
 
-  if (!parsed.success || !matchesUsername(parsed.data.username, configuredUsername)) {
-    return { message: "Invalid username or password." };
+  if (!parsed.success) {
+    return { message: "Enter a valid email address and password.", resetTurnstile: _previousState.resetTurnstile + 1 };
   }
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({
-    email: configuredEmail,
+    email: parsed.data.email,
     password: parsed.data.password,
+    options: parsed.data.captchaToken ? { captchaToken: parsed.data.captchaToken } : undefined,
   });
 
-  if (error) return { message: "Invalid username or password." };
-  redirect("/today");
+  if (error) return { message: "Invalid email or password.", resetTurnstile: _previousState.resetTurnstile + 1 };
+  redirect(destinationFor(await getAccountContext()));
 }
