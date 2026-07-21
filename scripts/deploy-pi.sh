@@ -118,5 +118,8 @@ remote_sha=$(git rev-parse "refs/remotes/origin/${branch}^{commit}")
   exit 1
 }
 
-git show "$sha:deploy/pi/deploy-release.sh" | bash -s -- "$sha" "$branch" "$@"
+release_script=$(mktemp /tmp/teachnotes-deploy-release.XXXXXX)
+trap 'rm -f "$release_script"' EXIT
+git show "$sha:deploy/pi/deploy-release.sh" > "$release_script"
+bash "$release_script" "$sha" "$branch" "$@"
 REMOTE_BOOTSTRAP

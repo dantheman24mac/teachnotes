@@ -33,5 +33,8 @@ branch=$2
 repo=/home/dantheman/code/teachnotes
 git -C "$repo" fetch --quiet --prune origin "$branch"
 [[ $(git -C "$repo" rev-parse "refs/remotes/origin/${branch}^{commit}") == "$sha" ]]
-git -C "$repo" show "$sha:deploy/pi/deploy-demo-release.sh" | bash -s -- "$sha" "$branch"
+release_script=$(mktemp /tmp/teachnotes-demo-release.XXXXXX)
+trap 'rm -f "$release_script"' EXIT
+git -C "$repo" show "$sha:deploy/pi/deploy-demo-release.sh" > "$release_script"
+bash "$release_script" "$sha" "$branch"
 REMOTE_BOOTSTRAP
