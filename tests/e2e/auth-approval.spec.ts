@@ -215,9 +215,10 @@ test.describe("authenticated account approval", () => {
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const emailA = `auth-e2e-a-${runId}@example.test`;
     const emailB = `auth-e2e-b-${runId}@example.test`;
-    const initialPasswordA = `A-${runId}-Password!`;
-    const initialPasswordB = `B-${runId}-Password!`;
-    const finalPasswordA = `Changed-${runId}-Password!`;
+    const generatedCredential = (label: string) => [label, runId, crypto.randomUUID(), "Aa1!"].join("-");
+    const initialPasswordA = generatedCredential("initial-a");
+    const initialPasswordB = generatedCredential("initial-b");
+    const finalPasswordA = generatedCredential("changed-a");
     const studentA = `Alice-only ${runId}`;
     const studentB = `Bob-only ${runId}`;
     const legacyStudentId = crypto.randomUUID();

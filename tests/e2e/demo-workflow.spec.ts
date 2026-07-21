@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 test("tutor can navigate the demo lesson workflow", async ({ page }) => {
   await page.goto("/today");
+  await expect(page.getByLabel("Portfolio demo information")).toContainText("Synthetic portfolio demo");
+  await expect(page.getByRole("link", { name: "View source" })).toHaveAttribute("href", "https://github.com/dantheman24mac/teachnotes");
   await expect(page.getByRole("heading", { name: "Today’s agenda" })).toBeVisible();
   await expect(page.getByText("Liam Jacobs").first()).toBeVisible();
   const navigation = (page.viewportSize()?.width ?? 1280) < 700

@@ -91,3 +91,18 @@ a database migration.
 For a code rollback, revert the faulty Git commit, let CI pass, and deploy the
 new revert commit through the same pipeline. Database rollback is intentionally
 not automated.
+
+## Demo release
+
+After the production commit has passed CI, deploy its credential-free synthetic
+demo independently:
+
+```bash
+scripts/deploy-demo-pi.sh
+```
+
+The command verifies a clean and pushed commit plus its CI run, builds the
+`demo` service in the exact detached release worktree, creates the isolated
+`teachnotes-demo` network when needed and connects the existing Cloudflare
+connector without restarting it. It never reads the Supabase keys into the demo
+container and never recreates `web`, Supabase or PostgreSQL.

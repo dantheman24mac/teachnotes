@@ -1,6 +1,8 @@
 import { addDays, addMinutes, startOfDay, subDays } from "date-fns";
 import type { BusinessSettings, Invoice, Lesson, Student } from "./types";
 
+// Every identity, address and financial value in this module is fictional and
+// exists only for local development, automated tests and demo.teachnotes.fyi.
 const today = startOfDay(new Date());
 const at = (dayOffset: number, hour: number, minute = 0) =>
   addMinutes(addDays(today, dayOffset), hour * 60 + minute).toISOString();

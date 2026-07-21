@@ -5,12 +5,16 @@ This deployment keeps TeachNotes, PostgreSQL, Auth, REST and invoice Storage on 
 ## Topology
 
 - `teachnotes.fyi` routes through Cloudflare Tunnel to `http://web:3000`.
-- `api.teachnotes.fyi` routes through Cloudflare Tunnel to `http://kong:8000`.
+- `api.teachnotes.fyi` routes only `/auth/v1`, `/rest/v1` and `/storage/v1`
+  through Cloudflare Tunnel to `http://kong:8000`; every other API-host path
+  returns `404` at the connector.
+- `demo.teachnotes.fyi` routes to `http://demo:3000`. The demo container has no
+  production environment file or Supabase credentials and is isolated on the
+  `teachnotes-demo` Docker network.
 - `web` uses `http://kong:8000` internally to avoid a public network round trip.
 - PostgreSQL and invoice files persist under `/srv/teachnotes/supabase/volumes`.
-- PostgreSQL and Supavisor bind only to loopback. Studio is protected by its
-  generated HTTP Basic Auth credentials and is reachable through the API
-  hostname until path-restricted tunnel ingress is enabled.
+- PostgreSQL, Supavisor and Kong bind only to loopback. Supabase Studio and
+  gateway administration paths are not included in Tunnel ingress.
 
 ## Prerequisites
 
@@ -30,6 +34,7 @@ The official Supabase stack recommends at least 4 GB RAM and an SSD. Use the off
 
    ```bash
    docker network create teachnotes
+   docker network create teachnotes-demo
    ```
 
 2. Install the official Supabase self-hosted Docker project into `/srv/teachnotes/supabase` by following <https://supabase.com/docs/guides/self-hosting/docker>. Generate fresh production secrets; never reuse the local CLI defaults.
@@ -84,6 +89,11 @@ The official Supabase stack recommends at least 4 GB RAM and an SSD. Use the off
      -f compose.app.yaml up -d --build
    ```
 
+   The normal production release rebuilds only `web`. Deploy the credential-free
+   demo independently with `scripts/deploy-demo-pi.sh`; the script builds the
+   exact pushed commit, starts only `demo`, and attaches the already-running
+   Cloudflare connector to `teachnotes-demo` without restarting it.
+
 9. Sign in as the owner and verify the administrator dashboard. Create a test
    signup and confirm it can read only its own pending account, not students,
    lessons, invoices, sync RPCs, or invoice Storage. Approve it and verify its
@@ -105,6 +115,21 @@ The official Supabase stack recommends at least 4 GB RAM and an SSD. Use the off
 ## Updates
 
 Pull a reviewed commit, take a backup, apply forward-only migrations, then rebuild the web container. Supabase image versions should be updated as a tested release set rather than independently.
+
+## Cloudflare ingress
+
+Keep the remotely managed Tunnel rules in this order:
+
+1. `teachnotes.fyi` → `http://web:3000`
+2. `api.teachnotes.fyi` with path `^/auth/v1(?:/.*)?$` → `http://kong:8000`
+3. `api.teachnotes.fyi` with path `^/rest/v1(?:/.*)?$` → `http://kong:8000`
+4. `api.teachnotes.fyi` with path `^/storage/v1(?:/.*)?$` → `http://kong:8000`
+5. `api.teachnotes.fyi` → `http_status:404`
+6. `demo.teachnotes.fyi` → `http://demo:3000`
+7. catch-all → `http_status:404`
+
+The demo DNS record is a proxied CNAME to the same Tunnel UUID. The demo
+container still has no access to the `teachnotes` production Docker network.
 
 ## Local-only backups
 

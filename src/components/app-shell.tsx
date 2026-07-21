@@ -4,6 +4,7 @@ import { CalendarDays, ClipboardList, GraduationCap, Menu, ReceiptText, Settings
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { DemoBanner } from "./demo-banner";
 import { SignOutButton } from "./sign-out-button";
 
 const links = [
@@ -38,6 +39,7 @@ export function AppShell({ children, demoMode, isAdmin = false, pendingUserCount
       {open && <button className="scrim" type="button" onClick={() => setOpen(false)} aria-label="Close navigation" />}
       <div className="content-frame">
         <header className="mobile-header"><button type="button" onClick={() => setOpen(true)} aria-label="Open menu"><Menu /></button><span>TeachNotes</span></header>
+        {demoMode && <DemoBanner />}
         <main className="page-shell">{children}</main>
       </div>
       <nav className="bottom-nav" aria-label="Mobile navigation">
