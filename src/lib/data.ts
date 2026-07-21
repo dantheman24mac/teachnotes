@@ -2,7 +2,8 @@ import { endOfMonth, startOfMonth } from "date-fns";
 import { demoInvoices, demoLessons, demoSettings, demoStudents } from "./demo-data";
 import { calculateInvoiceTotal, isBillable } from "./domain";
 import { expandSeries } from "./recurrence";
-import { createClient, getCurrentUser, isSupabaseConfigured } from "./supabase/server";
+import { requireApprovedUser } from "./auth";
+import { createClient, isSupabaseConfigured } from "./supabase/server";
 import type { BusinessSettings, Invoice, Lesson, Student } from "./types";
 
 function mapStudent(row: Record<string, unknown>): Student {
@@ -40,6 +41,7 @@ function mapLesson(row: Record<string, unknown>): Lesson {
 
 export async function getStudents(): Promise<Student[]> {
   if (!isSupabaseConfigured()) return demoStudents;
+  await requireApprovedUser();
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("students")
@@ -52,6 +54,7 @@ export async function getStudents(): Promise<Student[]> {
 
 export async function getStudent(id: string) {
   if (!isSupabaseConfigured()) return demoStudents.find((item) => item.id === id) ?? null;
+  await requireApprovedUser();
   const supabase = await createClient();
   const { data, error } = await supabase.from("students").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
@@ -71,6 +74,7 @@ export async function getLessons(options?: {
       .filter((lesson) => !options?.to || lesson.startsAt <= options.to)
       .slice(0, options?.limit ?? 500);
   }
+  await requireApprovedUser();
   const supabase = await createClient();
   let query = supabase
     .from("lessons")
@@ -88,6 +92,7 @@ export async function getLessons(options?: {
 
 export async function getLesson(id: string) {
   if (!isSupabaseConfigured()) return demoLessons.find((item) => item.id === id) ?? null;
+  await requireApprovedUser();
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("lessons")
@@ -100,8 +105,7 @@ export async function getLesson(id: string) {
 
 export async function getBusinessSettings(): Promise<BusinessSettings> {
   if (!isSupabaseConfigured()) return demoSettings;
-  const user = await getCurrentUser();
-  if (!user) return demoSettings;
+  const { user } = await requireApprovedUser();
   const supabase = await createClient();
   const { data } = await supabase.from("business_settings").select("*").eq("owner_id", user.id).maybeSingle();
   if (!data) return { ...demoSettings, tutorEmail: user.email ?? "" };
@@ -145,8 +149,7 @@ export async function getTodayDashboard() {
 
 export async function ensureSeriesHorizon() {
   if (!isSupabaseConfigured()) return;
-  const user = await getCurrentUser();
-  if (!user) return;
+  const { user } = await requireApprovedUser();
   const supabase = await createClient();
   const { data: seriesRows } = await supabase.from("lesson_series").select("*, students(default_duration_minutes, default_rate_cents)").eq("active", true).is("deleted_at", null);
   for (const series of seriesRows ?? []) {
@@ -160,6 +163,7 @@ export async function ensureSeriesHorizon() {
 
 export async function getInvoices(): Promise<Invoice[]> {
   if (!isSupabaseConfigured()) return demoInvoices;
+  await requireApprovedUser();
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("invoices")

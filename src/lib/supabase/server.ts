@@ -2,10 +2,15 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 export function isSupabaseConfigured() {
+  if (process.env.DEMO_MODE === "true") return false;
   return Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   );
+}
+
+export function isDemoMode() {
+  return process.env.DEMO_MODE === "true" || !isSupabaseConfigured();
 }
 
 export async function createClient() {

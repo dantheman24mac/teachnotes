@@ -1,23 +1,32 @@
 "use client";
 
-import { ArrowRight, CheckCircle2, Mail } from "lucide-react";
-import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { ArrowRight, LockKeyhole, Mail } from "lucide-react";
+import Link from "next/link";
+import { useActionState, useEffect, useState } from "react";
+import { signInWithPassword, type LoginState } from "@/app/login/actions";
+import { clearOfflineSessionMarker } from "@/lib/offline";
+import { TurnstileWidget } from "./turnstile-widget";
 
-export function LoginForm() {
-  const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy(true); setError("");
-    const client = createClient();
-    if (!client) { setError("Supabase is not configured. Copy .env.example to .env.local and add the local keys."); setBusy(false); return; }
-    const { error: authError } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/today` } });
-    if (authError) setError(authError.message); else setSent(true);
-    setBusy(false);
-  }
-  if (sent) return <div className="login-message"><CheckCircle2 /><h2>Check your inbox</h2><p>We sent a secure sign-in link to <strong>{email}</strong>.</p></div>;
-  return <form className="login-form" onSubmit={submit}><label htmlFor="email">Email address</label><div className="input-with-icon"><Mail size={18} /><input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></div>{error && <p className="form-error">{error}</p>}<button className="button-primary" disabled={busy} type="submit">{busy ? "Sending…" : "Email me a sign-in link"}<ArrowRight size={17} /></button><p className="form-help">No password to remember. Local email links appear in Supabase Mailpit.</p></form>;
+const initialState: LoginState = { message: "", resetTurnstile: 0 };
+
+export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string | null }) {
+  const [state, formAction, pending] = useActionState(signInWithPassword, initialState);
+  const [captchaToken, setCaptchaToken] = useState("");
+
+  useEffect(() => {
+    void clearOfflineSessionMarker();
+  }, []);
+
+  return <form className="login-form" action={formAction}>
+    <label htmlFor="email">Email</label>
+    <div className="input-with-icon"><Mail size={18} /><input id="email" name="email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required placeholder="you@example.com" /></div>
+    <label htmlFor="password">Password</label>
+    <div className="input-with-icon"><LockKeyhole size={18} /><input id="password" name="password" type="password" autoComplete="current-password" required placeholder="Your password" /></div>
+    <input name="captchaToken" type="hidden" value={captchaToken} />
+    <TurnstileWidget siteKey={turnstileSiteKey} onTokenChange={setCaptchaToken} resetKey={state.resetTurnstile} />
+    {state.message && <p className="form-error" aria-live="polite">{state.message}</p>}
+    <button className="button-primary" disabled={pending || Boolean(turnstileSiteKey && !captchaToken)} type="submit">{pending ? "Signing in…" : turnstileSiteKey && !captchaToken ? "Complete security check" : "Sign in"}<ArrowRight size={17} /></button>
+    <p className="auth-switch">New to TeachNotes? <Link href="/signup">Request an account</Link></p>
+    <p className="form-help">There is no email password recovery. Contact the administrator if you need help signing in.</p>
+  </form>;
 }
