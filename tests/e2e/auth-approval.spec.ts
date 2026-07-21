@@ -212,7 +212,7 @@ test.describe("authenticated account approval", () => {
   test("signup, approval, isolation, revocation and password replacement", async ({ browser, page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop", "The stateful authenticated lifecycle runs once in the desktop project");
 
-    const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const runId = `${Date.now()}-${crypto.randomUUID()}`;
     const emailA = `auth-e2e-a-${runId}@example.test`;
     const emailB = `auth-e2e-b-${runId}@example.test`;
     const generatedCredential = (label: string) => [label, runId, crypto.randomUUID(), "Aa1!"].join("-");
