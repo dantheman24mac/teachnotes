@@ -7,13 +7,16 @@
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "supabase:start": "supabase start -x edge-runtime,imgproxy,logflare,postgres-meta,realtime,studio,supavisor,vector",
+    "supabase:start": "supabase start -x edge-runtime,imgproxy,logflare,mailpit,postgres-meta,realtime,studio,supavisor,vector",
     "supabase:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "env:local": "node scripts/write-local-env.mjs",
+    "auth:create-owner": "node scripts/create-owner.mjs",
+    "auth:reset-owner": "node scripts/reset-owner-password.mjs",
     "dev:up": "npm run supabase:start && npm run env:local && docker compose --env-file .env.local up --build web",
     "dev:down": "docker compose --env-file .env.local down && npm run supabase:stop"
   },
@@ -30,6 +33,9 @@
     "react-dom": "19.2.4",
     "rrule": "^2.8.1",
     "zod": "^4.4.3"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

@@ -5,16 +5,15 @@ import { fromZonedTime } from "date-fns-tz";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { requireApprovedUser } from "@/lib/auth";
 import { expandSeries } from "@/lib/recurrence";
 import { getBusinessSettings, getInvoice, getInvoicePreview, getStudent } from "@/lib/data";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
-import { createClient, getCurrentUser, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { Invoice } from "@/lib/types";
 
 async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) throw new Error("You must be signed in");
-  return user;
+  return (await requireApprovedUser()).user;
 }
 
 export async function signOut() {

@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { AuthorizationError, requireApprovedUser } from "@/lib/auth";
 import { demoLessons, demoStudents } from "@/lib/demo-data";
-import { createClient, getCurrentUser, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { Lesson, SyncOperation } from "@/lib/types";
 
 const operationSchema = z.object({
@@ -19,8 +20,12 @@ function mapLesson(row: Record<string, unknown>): Lesson {
 export async function GET(request: Request) {
   const after = Math.max(0, Number(new URL(request.url).searchParams.get("after") ?? 0));
   if (!isSupabaseConfigured()) return Response.json({ revision: 100, lessons: demoLessons.filter((lesson) => lesson.syncRevision > after), students: demoStudents.filter((student) => (student.syncRevision ?? 0) > after), tombstones: [] }, { headers: { "cache-control": "private, no-store" } });
-  const user = await getCurrentUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    await requireApprovedUser();
+  } catch (error) {
+    const status = error instanceof AuthorizationError ? error.status : 500;
+    return Response.json({ error: status === 401 ? "Unauthorized" : "Forbidden" }, { status });
+  }
   const supabase = await createClient();
   const [{ data: lessonRows, error: lessonError }, { data: studentRows, error: studentError }] = await Promise.all([
     supabase.from("lessons").select("*, students(display_name)").gt("sync_revision", after).order("sync_revision").limit(500),
@@ -42,7 +47,12 @@ export async function POST(request: Request) {
     });
     return Response.json({ applied, conflicts: [] });
   }
-  if (!(await getCurrentUser())) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    await requireApprovedUser();
+  } catch (error) {
+    const status = error instanceof AuthorizationError ? error.status : 500;
+    return Response.json({ error: status === 401 ? "Unauthorized" : "Forbidden" }, { status });
+  }
   const supabase = await createClient();
   const applied: Array<{ operationId: string; lesson: Lesson }> = [];
   const conflicts: Array<{ operation: SyncOperation; serverLesson: Lesson }> = [];

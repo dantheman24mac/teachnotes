@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0f302c">
+  <title>TeachNotes offline</title>
+  <style>
+    :root{color-scheme:light;--ink:#183b36;--deep:#0f302c;--paper:#f4f3ec;--surface:#fffefa;--line:#dfe4df;--muted:#69807a;--orange:#d7834e;--sage:#dbe8e3}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px clamp(16px,5vw,54px);color:white;background:var(--deep)}header strong{font-size:18px}header span{color:#bcd0ca;font-size:12px}.page{width:min(900px,100%);margin:auto;padding:42px clamp(16px,5vw,54px) 80px}h1{margin:0;font:600 clamp(32px,7vw,54px)/1.05 Georgia,serif}h2{font:600 22px Georgia,serif}.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:30px}.intro p,.muted{color:var(--muted)}.badge{padding:7px 10px;border-radius:99px;color:#8c572f;background:#f8e7da;font-size:12px;font-weight:700;white-space:nowrap}.list{display:grid;gap:10px}.card{display:grid;grid-template-columns:75px 1fr;gap:16px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}.time{font-weight:800}.time small{display:block;color:var(--muted);font-weight:400}.card h3{margin:0 0 5px}.status-row{display:flex;flex-wrap:wrap;gap:6px;margin:13px 0}.status-row button{padding:7px 9px;border:1px solid var(--line);border-radius:8px;color:var(--muted);background:white}.status-row button.active{color:var(--ink);border-color:#8aa59d;background:var(--sage)}textarea{width:100%;min-height:78px;padding:10px;border:1px solid var(--line);border-radius:9px;resize:vertical;font:inherit}.saved{min-height:18px;margin:5px 0 0;color:var(--muted);font-size:11px}.empty{padding:40px 24px;border:1px solid var(--line);border-radius:14px;background:var(--surface);text-align:center}.reconnect{display:inline-block;margin-top:20px;padding:10px 14px;border-radius:9px;color:white;background:var(--deep);font-weight:700;text-decoration:none}@media(max-width:560px){.intro{align-items:flex-start;flex-direction:column}.card{grid-template-columns:1fr}.time small{display:inline;margin-left:5px}}
+  </style>
+</head>
+<body>
+  <header><strong>TeachNotes</strong><span>Offline on this device</span></header>
+  <main class="page">
+    <div class="intro"><div><p class="muted" id="date"></p><h1>Today’s agenda</h1><p class="muted">This neutral offline view loads lessons only from the active account’s private device cache.</p></div><span class="badge" id="pending">Offline</span></div>
+    <section class="list" id="lessons"><div class="empty"><h2>Loading device data…</h2></div></section>
+  </main>
+  <script>
+    (()=>{
+      const activeUser=localStorage.getItem("teachnotes-active-user");
+      const list=document.getElementById("lessons");
+      const pending=document.getElementById("pending");
+      document.getElementById("date").textContent=new Intl.DateTimeFormat("en-ZA",{weekday:"long",day:"numeric",month:"long"}).format(new Date());
+      const empty=(title,copy)=>{list.textContent="";const box=document.createElement("div");box.className="empty";const h=document.createElement("h2");h.textContent=title;const p=document.createElement("p");p.className="muted";p.textContent=copy;const a=document.createElement("a");a.className="reconnect";a.href="/today";a.textContent="Try reconnecting";box.append(h,p,a);list.append(box)};
+      if(!activeUser){empty("No active offline account","Reconnect and sign in before using TeachNotes offline.");return}
+      const dbName=`teachnotes-user-${activeUser.replace(/[^a-zA-Z0-9_-]/g,"_")}`;
+      const request=indexedDB.open(dbName);
+      request.onerror=()=>empty("Device data is unavailable","Reconnect and open Today once to prepare this account for offline work.");
+      request.onsuccess=()=>{
+        const db=request.result;
+        if(!db.objectStoreNames.contains("lessons")||!db.objectStoreNames.contains("outbox")){db.close();empty("No offline lessons yet","Reconnect and open Today once to prepare this account for offline work.");return}
+        const tx=db.transaction(["lessons","outbox"],"readonly");
+        const lessonsRequest=tx.objectStore("lessons").getAll();
+        const countRequest=tx.objectStore("outbox").count();
+        countRequest.onsuccess=()=>{pending.textContent=countRequest.result?`${countRequest.result} edit${countRequest.result===1?"":"s"} waiting`:"Offline · synced"};
+        lessonsRequest.onsuccess=()=>{
+          const today=new Date().toDateString();
+          const lessons=lessonsRequest.result.filter(item=>new Date(item.startsAt).toDateString()===today).sort((a,b)=>a.startsAt.localeCompare(b.startsAt));
+          list.textContent="";
+          if(!lessons.length){empty("No cached lessons today","Your cached schedule is empty for today. Reconnect to refresh it.");return}
+          lessons.forEach(lesson=>list.append(renderLesson(db,lesson)));
+        };
+      };
+      function queuePatch(db,lesson,patch,message){
+        const tx=db.transaction(["lessons","outbox"],"readwrite");
+        const updated=Object.assign({},lesson,patch);
+        tx.objectStore("lessons").put(updated);
+        tx.objectStore("outbox").put({id:crypto.randomUUID(),lessonId:lesson.id,baseVersion:lesson.version,patch,clientTimestamp:new Date().toISOString()});
+        tx.oncomplete=()=>{Object.assign(lesson,patch);message.textContent="Saved on this device. It will sync when you reconnect.";const countTx=db.transaction("outbox","readonly");const count=countTx.objectStore("outbox").count();count.onsuccess=()=>{pending.textContent=`${count.result} edit${count.result===1?"":"s"} waiting`}};
+        tx.onerror=()=>{message.textContent="This edit could not be saved."};
+      }
+      function renderLesson(db,lesson){
+        const card=document.createElement("article");card.className="card";
+        const time=document.createElement("div");time.className="time";time.textContent=new Intl.DateTimeFormat("en-ZA",{hour:"2-digit",minute:"2-digit"}).format(new Date(lesson.startsAt));const duration=document.createElement("small");duration.textContent=`${lesson.durationMinutes} min`;time.append(duration);
+        const body=document.createElement("div");const title=document.createElement("h3");title.textContent=lesson.studentName;const statuses=document.createElement("div");statuses.className="status-row";const message=document.createElement("p");message.className="saved";
+        [["attended","Attended"],["no_show","No show"],["canceled_rescheduled","Rescheduled"]].forEach(([value,label])=>{const button=document.createElement("button");button.type="button";button.textContent=label;if(lesson.status===value)button.className="active";button.onclick=()=>{queuePatch(db,lesson,{status:value},message);statuses.querySelectorAll("button").forEach(item=>item.classList.toggle("active",item===button))};statuses.append(button)});
+        const note=document.createElement("textarea");note.value=lesson.notes||"";note.placeholder="Lesson note";note.onchange=()=>queuePatch(db,lesson,{notes:note.value},message);
+        body.append(title,statuses,note,message);card.append(time,body);return card;
+      }
+    })();
+  </script>
+</body>
+</html>

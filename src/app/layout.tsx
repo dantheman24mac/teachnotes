@@ -13,9 +13,15 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: { default: "TeachNotes", template: "%s · TeachNotes" },
   description: "Lesson notes, attendance, scheduling and invoicing for independent tutors.",
   applicationName: "TeachNotes",
+  openGraph: {
+    type: "website",
+    title: "TeachNotes",
+    description: "Offline-friendly lesson management and invoicing for independent tutors.",
+  },
 };
 
 export default function RootLayout({

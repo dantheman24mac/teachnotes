@@ -1,9 +1,17 @@
+import { AuthorizationError, requireApprovedUser } from "@/lib/auth";
 import { getBusinessSettings, getInvoice } from "@/lib/data";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
-import { createClient, getCurrentUser, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (isSupabaseConfigured() && !(await getCurrentUser())) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (isSupabaseConfigured()) {
+    try {
+      await requireApprovedUser();
+    } catch (error) {
+      const status = error instanceof AuthorizationError ? error.status : 500;
+      return Response.json({ error: status === 401 ? "Unauthorized" : "Forbidden" }, { status });
+    }
+  }
   const { id } = await params;
   const invoice = await getInvoice(id);
   if (!invoice) return new Response("Not found", { status: 404 });
