@@ -64,7 +64,11 @@ printf 'Building the isolated synthetic-data demo from %s...\n' "$sha"
 "${compose[@]}" build demo
 "${compose[@]}" up -d --no-deps demo
 
-cloudflared_id=$(docker ps --filter label=com.docker.compose.project=teachnotes --filter label=com.docker.compose.service=cloudflared --format '{{.ID}}' | head -n 1)
+if [[ $(docker inspect --format '{{.State.Running}}' teachnotes-cloudflared 2>/dev/null || true) == "true" ]]; then
+  cloudflared_id=$(docker inspect --format '{{.Id}}' teachnotes-cloudflared)
+else
+  cloudflared_id=$(docker ps --filter label=com.docker.compose.project=teachnotes --filter label=com.docker.compose.service=cloudflared --format '{{.ID}}' | head -n 1)
+fi
 [[ -n $cloudflared_id ]] || die "the TeachNotes Cloudflare connector is not running"
 if ! docker inspect "$cloudflared_id" --format '{{json .NetworkSettings.Networks}}' | grep -q 'teachnotes-demo'; then
   docker network connect teachnotes-demo "$cloudflared_id"
