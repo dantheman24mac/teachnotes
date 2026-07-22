@@ -59,6 +59,7 @@ compose=(
   --env-file "$secret_dir/tunnel.env"
   -f "$release_dir/deploy/pi/compose.app.yaml"
 )
+export DEPLOYMENT_VERSION=$sha
 
 printf 'Building the isolated synthetic-data demo from %s...\n' "$sha"
 "${compose[@]}" build demo

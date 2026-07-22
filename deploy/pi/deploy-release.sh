@@ -88,6 +88,7 @@ compose=(
   --env-file "$secret_dir/tunnel.env"
   -f "$release_dir/deploy/pi/compose.app.yaml"
 )
+export DEPLOYMENT_VERSION=$sha
 
 printf 'Release:  %s\n' "$sha"
 printf 'Branch:   %s\n' "$branch"

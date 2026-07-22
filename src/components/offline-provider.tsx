@@ -59,10 +59,6 @@ export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = 
   }, [ready, refresh, userId]);
 
   useEffect(() => {
-    void navigator.serviceWorker?.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
     let active = true;
     void (async () => {
       if (!active) return;

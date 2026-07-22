@@ -110,6 +110,12 @@ async function accessToken(context: BrowserContext) {
   return token!;
 }
 
+async function authCookieNames(context: BrowserContext) {
+  return (await context.cookies())
+    .map(({ name }) => name)
+    .filter((name) => /-auth-token(?:\.\d+)?$/.test(name));
+}
+
 async function reviewFromAdmin(
   page: Page,
   admin: SupabaseClient,
@@ -205,17 +211,36 @@ async function databaseRecordExists(page: Page, databaseName: string, storeName:
   }), { databaseName, storeName, id });
 }
 
+async function seedOfflineStudent(page: Page, databaseName: string, id: string) {
+  await page.evaluate(async ({ databaseName: name, id: studentId }) => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open(name);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction("students", "readwrite");
+      transaction.objectStore("students").put({ id: studentId, displayName: "Offline cleanup sentinel" });
+      transaction.oncomplete = () => { db.close(); resolve(); };
+      transaction.onerror = () => { db.close(); reject(transaction.error); };
+    };
+  }), { databaseName, id });
+}
+
+async function teachNotesCacheNames(page: Page) {
+  return page.evaluate(async () => (await caches.keys()).filter((name) => name.startsWith("teachnotes-")));
+}
+
 test.describe("authenticated account approval", () => {
   test.skip(!enabled, "Set AUTH_E2E=true to run authenticated Supabase coverage");
   test.skip(enabled && missingConfiguration.length > 0, `Missing authenticated E2E configuration: ${missingConfiguration.join(", ")}`);
 
   test("signup, approval, isolation, revocation and password replacement", async ({ browser, page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop", "The stateful authenticated lifecycle runs once in the desktop project");
+    test.setTimeout(180_000);
 
     const runId = `${Date.now()}-${crypto.randomUUID()}`;
     const emailA = `auth-e2e-a-${runId}@example.test`;
     const emailB = `auth-e2e-b-${runId}@example.test`;
-    const generatedCredential = (label: string) => [label, runId, crypto.randomUUID(), "Aa1!"].join("-");
+    const generatedCredential = (label: string) => [label, crypto.randomUUID(), "Aa1!"].join("-");
     const initialPasswordA = generatedCredential("initial-a");
     const initialPasswordB = generatedCredential("initial-b");
     const finalPasswordA = generatedCredential("changed-a");
@@ -227,6 +252,14 @@ test.describe("authenticated account approval", () => {
     const userBContext = await browser.newContext({ baseURL: appBaseUrl });
     const adminPage = await adminContext.newPage();
     const userBPage = await userBContext.newPage();
+    const consoleErrors: string[] = [];
+    const pageErrors: string[] = [];
+    for (const [label, observedPage] of [["user-a", page], ["admin", adminPage], ["user-b", userBPage]] as const) {
+      observedPage.on("console", (message) => {
+        if (message.type() === "error") consoleErrors.push(`${label}: ${message.text()}`);
+      });
+      observedPage.on("pageerror", (error) => pageErrors.push(`${label}: ${error.message}`));
+    }
 
     try {
       const adminAccount = await accountByEmail(admin, adminEmail);
@@ -243,7 +276,8 @@ test.describe("authenticated account approval", () => {
       await expect.poll(() => databaseRecordExists(adminPage, adminDatabase, "students", legacyStudentId)).toBe(true);
 
       const adminToken = await accessToken(adminContext);
-      const { error: protectedError } = await userClient(adminToken).rpc("review_account", {
+      const directAdmin = userClient(adminToken);
+      const { error: protectedError } = await directAdmin.rpc("review_account", {
         p_user_id: adminAccount!.user_id,
         p_status: "rejected",
       });
@@ -292,11 +326,9 @@ test.describe("authenticated account approval", () => {
       const directB = userClient(tokenB);
 
       await reviewFromAdmin(adminPage, admin, emailA, "pending", "Approve", "approved");
-      await page.getByRole("button", { name: "Check now" }).click();
-      await expect(page).toHaveURL(/\/today$/);
+      await expect(page).toHaveURL(/\/today$/, { timeout: 15_000 });
       await reviewFromAdmin(adminPage, admin, emailB, "pending", "Approve", "approved");
-      await userBPage.getByRole("button", { name: "Check now" }).click();
-      await expect(userBPage).toHaveURL(/\/today$/);
+      await expect(userBPage).toHaveURL(/\/today$/, { timeout: 15_000 });
 
       await createStudent(page, studentA);
       await createStudent(userBPage, studentB);
@@ -319,6 +351,9 @@ test.describe("authenticated account approval", () => {
       const databaseA = `teachnotes-user-${accountA.user_id}`;
       await expect.poll(() => page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBe(accountA.user_id);
       await expect.poll(() => databaseNames(page)).toContain(databaseA);
+      await seedOfflineStudent(page, databaseA, rowsA![0].id);
+      await expect.poll(() => databaseRecordExists(page, databaseA, "students", rowsA![0].id)).toBe(true);
+      await expect.poll(() => teachNotesCacheNames(page)).toContain("teachnotes-offline-v4");
 
       await reviewFromAdmin(adminPage, admin, emailA, "approved", "Revoke", "rejected");
       await page.goto("/students");
@@ -326,13 +361,40 @@ test.describe("authenticated account approval", () => {
       await expect(page.getByRole("heading", { name: "Your account is not active" })).toBeVisible();
       expect((await page.context().request.get("/api/sync")).status()).toBe(403);
       expect((await directA.from("students").select("id")).data).toEqual([]);
+      await expect.poll(() => page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBeNull();
+      await expect.poll(() => databaseRecordExists(page, databaseA, "students", rowsA![0].id)).toBe(false);
+
+      await page.getByRole("button", { name: "Sign out and clear this device", exact: true }).click();
+      await expect(page).toHaveURL(/\/login$/);
+      await expect.poll(() => authCookieNames(page.context())).toHaveLength(0);
+      expect((await page.context().request.get("/api/account-status")).status()).toBe(401);
+      expect(await databaseRecordExists(page, databaseA, "students", rowsA![0].id)).toBe(false);
+      expect(await page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBeNull();
+      await expect.poll(() => teachNotesCacheNames(page)).toEqual([]);
+
+      await signIn(page, emailA, initialPasswordA);
+      await expect(page).toHaveURL(/\/pending$/);
+      await expect(page.getByRole("heading", { name: "Your account is not active" })).toBeVisible();
 
       await reviewFromAdmin(adminPage, admin, emailA, "rejected", "Approve", "approved");
+      await expect(page).toHaveURL(/\/today$/, { timeout: 15_000 });
+
+      await reviewFromAdmin(adminPage, admin, emailA, "approved", "Revoke", "rejected");
+      await page.goto("/students");
+      await expect(page).toHaveURL(/\/pending$/);
+      await expect(page.getByRole("heading", { name: "Your account is not active" })).toBeVisible();
+      const { error: manualApprovalError } = await directAdmin.rpc("review_account", {
+        p_user_id: accountA.user_id,
+        p_status: "approved",
+      });
+      expect(manualApprovalError).toBeNull();
+      await expect.poll(async () => (await accountByEmail(admin, emailA))?.status).toBe("approved");
       await page.getByRole("button", { name: "Check now" }).click();
       await expect(page).toHaveURL(/\/today$/);
 
       const temporaryPassword = await resetPasswordFromAdmin(adminPage, admin, emailA);
       await page.goto("/today");
+      if (new URL(page.url()).pathname === "/login") await signIn(page, emailA, temporaryPassword);
       await expect(page).toHaveURL(/\/change-password$/);
       await page.getByLabel("Temporary or current password").fill(temporaryPassword);
       await page.getByLabel("New password", { exact: true }).fill(finalPasswordA);
@@ -343,7 +405,7 @@ test.describe("authenticated account approval", () => {
       await expect.poll(async () => (await accountByEmail(admin, emailA))?.must_change_password).toBe(false);
 
       await page.goto("/settings");
-      await page.getByRole("button", { name: /Sign out and clear this device/ }).click();
+      await page.getByRole("complementary").getByRole("button", { name: "Sign out and clear this device", exact: true }).click();
       await expect(page).toHaveURL(/\/login$/);
       await expect.poll(() => databaseRecordExists(page, databaseA, "students", rowsA![0].id)).toBe(false);
 
@@ -362,6 +424,12 @@ test.describe("authenticated account approval", () => {
       const protectedRow = adminPage.locator("article.account-row").filter({ hasText: adminEmail });
       await expect(protectedRow.getByText("Protected administrator")).toBeVisible();
       await expect(protectedRow.getByRole("button", { name: /Reject|Revoke|Reset password/ })).toHaveCount(0);
+
+      expect(pageErrors, "Browser pages must not throw runtime errors").toEqual([]);
+      expect(
+        consoleErrors.filter((message) => /hydration|Minified React error #418|server rendered HTML/i.test(message)),
+        "Browser consoles must not report hydration failures",
+      ).toEqual([]);
     } finally {
       await adminContext.close();
       await userBContext.close();

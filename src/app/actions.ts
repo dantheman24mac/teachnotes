@@ -3,6 +3,7 @@
 import { addDays, endOfMonth } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/auth";
@@ -16,11 +17,24 @@ async function requireUser() {
   return (await requireApprovedUser()).user;
 }
 
-export async function signOut() {
-  if (isSupabaseConfigured()) {
-    const supabase = await createClient();
-    await supabase.auth.signOut();
+export async function clearLocalSession() {
+  const cookieStore = await cookies();
+  try {
+    if (isSupabaseConfigured()) {
+      const supabase = await createClient();
+      await supabase.auth.signOut({ scope: "local" });
+    }
+  } finally {
+    for (const cookie of cookieStore.getAll()) {
+      if (/-auth-token(?:\.\d+)?$/.test(cookie.name) || cookie.name.endsWith("-auth-token-code-verifier")) {
+        cookieStore.delete(cookie.name);
+      }
+    }
   }
+}
+
+export async function signOut() {
+  await clearLocalSession();
   redirect("/login");
 }
 

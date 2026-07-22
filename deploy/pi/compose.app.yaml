@@ -9,6 +9,7 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        DEPLOYMENT_VERSION: ${DEPLOYMENT_VERSION:-local}
     env_file:
       - app.env
     environment:
@@ -41,6 +42,7 @@ services:
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ""
         NEXT_PUBLIC_APP_URL: https://demo.teachnotes.fyi
         DEMO_MODE: "true"
+        DEPLOYMENT_VERSION: ${DEPLOYMENT_VERSION:-local}
     environment:
       DEMO_MODE: "true"
       HOSTNAME: 0.0.0.0

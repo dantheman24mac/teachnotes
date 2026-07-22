@@ -38,6 +38,10 @@ export function TurnstileWidget({ onTokenChange, resetKey, siteKey }: { onTokenC
     window.turnstile.reset(widgetRef.current);
   }, [onTokenChange, resetKey]);
 
+  useEffect(() => {
+    renderWidget();
+  }, [renderWidget]);
+
   useEffect(() => () => {
     if (widgetRef.current && window.turnstile) window.turnstile.remove(widgetRef.current);
     widgetRef.current = null;

@@ -3,11 +3,11 @@
 import { Clock3, ShieldX } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { SignOutButton } from "@/components/sign-out-button";
-import { clearOfflineSessionMarker } from "@/lib/offline";
+import { clearOfflineData, clearOfflineSessionMarker } from "@/lib/offline";
 
 type AccountStatus = "pending" | "approved" | "rejected";
 
-export function PendingStatus({ initialStatus, email }: { initialStatus: AccountStatus; email: string }) {
+export function PendingStatus({ initialStatus, email, userId }: { initialStatus: AccountStatus; email: string; userId: string }) {
   const [status, setStatus] = useState(initialStatus);
   const [checking, setChecking] = useState(false);
 
@@ -23,14 +23,16 @@ export function PendingStatus({ initialStatus, email }: { initialStatus: Account
       if (!response.ok) return;
       const result = await response.json() as { status: AccountStatus; mustChangePassword: boolean };
       setStatus(result.status);
+      if (result.status === "rejected") await clearOfflineData(userId);
       if (result.status === "approved") window.location.replace(result.mustChangePassword ? "/change-password" : "/today");
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    void clearOfflineSessionMarker();
+    if (initialStatus === "rejected") void clearOfflineData(userId);
+    else void clearOfflineSessionMarker();
     const interval = window.setInterval(() => void checkStatus(), 5000);
     const onFocus = () => void checkStatus();
     const onVisibility = () => { if (document.visibilityState === "visible") void checkStatus(); };
@@ -41,7 +43,7 @@ export function PendingStatus({ initialStatus, email }: { initialStatus: Account
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [checkStatus]);
+  }, [checkStatus, initialStatus, userId]);
 
   const rejected = status === "rejected";
   return <main className="status-page"><section className="status-card">
@@ -51,6 +53,6 @@ export function PendingStatus({ initialStatus, email }: { initialStatus: Account
     <p className="subtle">{rejected ? "The administrator declined or revoked this account. They can approve it later if circumstances change." : "You are signed in. This page will open your Today view automatically after the administrator approves you."}</p>
     <dl className="status-details"><div><dt>Account</dt><dd>{email}</dd></div><div><dt>Status</dt><dd>{rejected ? "Rejected" : checking ? "Checking…" : "Waiting for approval"}</dd></div></dl>
     <button className="button-secondary full-width" type="button" onClick={() => void checkStatus()} disabled={checking}>{checking ? "Checking…" : "Check now"}</button>
-    <div className="status-signout"><SignOutButton /></div>
+    <div className="status-signout"><SignOutButton userId={userId} /></div>
   </section></main>;
 }

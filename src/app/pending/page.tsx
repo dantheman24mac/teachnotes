@@ -9,5 +9,5 @@ export default async function PendingPage() {
   const context = await getAccountContext();
   if (!context) redirect("/login");
   if (context.account?.status === "approved") redirect(context.account.mustChangePassword ? "/change-password" : "/today");
-  return <PendingStatus initialStatus={context.account?.status === "rejected" ? "rejected" : "pending"} email={context.account?.email ?? context.user.email ?? "Your account"} />;
+  return <PendingStatus initialStatus={context.account?.status === "rejected" ? "rejected" : "pending"} email={context.account?.email ?? context.user.email ?? "Your account"} userId={context.user.id} />;
 }
