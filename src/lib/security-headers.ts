@@ -21,6 +21,12 @@ export const staticSecurityHeaders = [
   },
 ] as const;
 
+export function preventResponseTransformation(cacheControl: string | null) {
+  if (!cacheControl) return "private, no-store, no-transform";
+  const directives = cacheControl.split(",").map((directive) => directive.trim().toLowerCase());
+  return directives.includes("no-transform") ? cacheControl : `${cacheControl}, no-transform`;
+}
+
 export function buildContentSecurityPolicy({
   nonce,
   development = false,

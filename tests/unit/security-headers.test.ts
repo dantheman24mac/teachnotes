@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildContentSecurityPolicy, staticSecurityHeaders } from "@/lib/security-headers";
+import { buildContentSecurityPolicy, preventResponseTransformation, staticSecurityHeaders } from "@/lib/security-headers";
 
 describe("security headers", () => {
   it("builds a nonce-based policy for production and Turnstile", () => {
@@ -33,5 +33,11 @@ describe("security headers", () => {
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
     });
+  });
+
+  it("prevents edge HTML transformations without discarding cache directives", () => {
+    expect(preventResponseTransformation(null)).toBe("private, no-store, no-transform");
+    expect(preventResponseTransformation("private, no-store")).toBe("private, no-store, no-transform");
+    expect(preventResponseTransformation("private, NO-TRANSFORM")).toBe("private, NO-TRANSFORM");
   });
 });

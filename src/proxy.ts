@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { buildContentSecurityPolicy } from "@/lib/security-headers";
+import { buildContentSecurityPolicy, preventResponseTransformation } from "@/lib/security-headers";
 import { updateSession } from "@/lib/supabase/proxy";
 
 export async function proxy(request: NextRequest) {
@@ -16,6 +16,9 @@ export async function proxy(request: NextRequest) {
 
   const response = await updateSession(request, requestHeaders);
   response.headers.set("Content-Security-Policy", contentSecurityPolicy);
+  // Cloudflare Email Address Obfuscation rewrites visible account emails before
+  // React hydrates, so authenticated pages must opt out of edge HTML transforms.
+  response.headers.set("Cache-Control", preventResponseTransformation(response.headers.get("Cache-Control")));
   return response;
 }
 
