@@ -1,0 +1,21 @@
+[Unit]
+Description=Create a TeachNotes report for the preceding Raspberry Pi boot
+After=network-online.target time-sync.target docker.service tailscaled.service
+Wants=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/teachnotes-boot-report
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/srv/teachnotes/incidents
+
+[Install]
+WantedBy=multi-user.target

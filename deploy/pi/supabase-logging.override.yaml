@@ -1,0 +1,29 @@
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  imgproxy:
+    logging: *default-logging
+  studio:
+    logging: *default-logging
+  db:
+    logging: *default-logging
+  supavisor:
+    logging: *default-logging
+  kong:
+    logging: *default-logging
+  meta:
+    logging: *default-logging
+  realtime:
+    logging: *default-logging
+  rest:
+    logging: *default-logging
+  storage:
+    logging: *default-logging
+  auth:
+    logging: *default-logging
+  functions:
+    logging: *default-logging
