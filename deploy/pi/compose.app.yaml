@@ -63,6 +63,7 @@ services:
         max-file: "5"
 
   cloudflared:
+    container_name: teachnotes-cloudflared
     image: cloudflare/cloudflared:2026.7.1
     command: tunnel --no-autoupdate run
     env_file:
