@@ -56,6 +56,9 @@ On the Pi, the release command fetches without pulling into the dirty long-lived
 checkout, builds the exact commit in an isolated worktree, replaces only the
 `web` service, waits for internal container health, and then checks the public
 health and login endpoints. Supabase and Cloudflare Tunnel are not recreated.
+The commit is also used as Next.js' deployment ID and exposed as `releaseSha`
+by `/api/health`; internal and public checks require that value to match the
+requested commit before accepting a future release.
 
 ## Database migrations
 

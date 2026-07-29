@@ -20,6 +20,7 @@ fi
 
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "invalid release SHA"
 [[ $branch =~ ^[A-Za-z0-9._/-]+$ ]] || die "invalid release branch"
+export TEACHNOTES_RELEASE_SHA=$sha
 
 repo=${TEACHNOTES_REPO:-/home/dantheman/code/teachnotes}
 release_root=${TEACHNOTES_RELEASE_ROOT:-/home/dantheman/releases/teachnotes}
@@ -127,7 +128,8 @@ for _ in $(seq 1 30); do
     if [[ $health_status == "healthy" ]]; then
       health_body=$("${compose[@]}" exec -T web wget -qO- http://127.0.0.1:3000/api/health) || true
       if grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$health_body" &&
-        grep -Eq '"service"[[:space:]]*:[[:space:]]*"teachnotes"' <<<"$health_body"; then
+        grep -Eq '"service"[[:space:]]*:[[:space:]]*"teachnotes"' <<<"$health_body" &&
+        grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$health_body"; then
         healthy=true
         break
       fi
@@ -152,6 +154,9 @@ public_health=$(curl -fsS --retry 3 --retry-delay 2 https://teachnotes.fyi/api/h
 }
 grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$public_health" || {
   die "the public health endpoint returned an unexpected response"
+}
+grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$public_health" || {
+  die "the public health endpoint returned a different release SHA"
 }
 curl -fsS --retry 3 --retry-delay 2 -o /dev/null https://teachnotes.fyi/login || {
   die "the release is internally healthy, but the public login page failed"
