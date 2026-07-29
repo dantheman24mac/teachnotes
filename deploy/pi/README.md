@@ -61,6 +61,7 @@ The official Supabase stack recommends at least 4 GB RAM and an SSD. Use the off
    cd /srv/teachnotes/supabase
    docker compose -f docker-compose.yml \
      -f /home/dantheman/code/teachnotes/deploy/pi/supabase-network.override.yaml \
+     -f /home/dantheman/code/teachnotes/deploy/pi/supabase-logging.override.yaml \
      up -d
    ```
 
@@ -115,6 +116,19 @@ The official Supabase stack recommends at least 4 GB RAM and an SSD. Use the off
 ## Updates
 
 Pull a reviewed commit, take a backup, apply forward-only migrations, then rebuild the web container. Supabase image versions should be updated as a tested release set rather than independently.
+
+Always include both `supabase-network.override.yaml` and
+`supabase-logging.override.yaml` when starting or updating the production
+Supabase stack. The logging override bounds each service at five 10 MB JSON log
+files.
+
+## Outage logging and monitoring
+
+The Pi uses a five-minute systemd monitor, persistent bounded journals, boot
+incident reports and independent UptimeRobot checks. See
+[Raspberry Pi outage logging and monitoring](../../docs/pi-observability.md)
+for installation, private heartbeat configuration, Discord alerts and the
+diagnosis matrix.
 
 ## Cloudflare ingress
 

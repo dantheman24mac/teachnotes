@@ -30,7 +30,7 @@ services:
       driver: json-file
       options:
         max-size: 10m
-        max-file: "3"
+        max-file: "5"
 
   demo:
     build:
@@ -60,9 +60,10 @@ services:
       driver: json-file
       options:
         max-size: 10m
-        max-file: "3"
+        max-file: "5"
 
   cloudflared:
+    container_name: teachnotes-cloudflared
     image: cloudflare/cloudflared:2026.7.1
     command: tunnel --no-autoupdate run
     env_file:
@@ -78,7 +79,7 @@ services:
       driver: json-file
       options:
         max-size: 10m
-        max-file: "3"
+        max-file: "5"
 
 networks:
   teachnotes:
