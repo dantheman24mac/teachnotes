@@ -157,9 +157,12 @@ h3 { margin-bottom: .3rem; }
 .avatar { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 50%; color: var(--forest); background: var(--forest-soft); font-size: .75rem; font-weight: 800; }
 .avatar.large { width: 76px; height: 76px; font-size: 1.15rem; }
 .student-rate { text-align: right; }
+.archive-badge { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 5px 8px; border-radius: 99px; color: #8c572f; background: var(--orange-soft); font-size: .66rem; font-weight: 800; text-transform: uppercase; }
+.student-row .archive-badge { justify-self: end; }
 .profile-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 28px; }
 .profile-hero h1 { margin-bottom: 5px; }
 .profile-hero p:last-child { margin: 0; color: var(--muted); }
+.profile-archive-badge { margin-left: auto; }
 .back-link { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 24px; color: var(--muted); font-size: .8rem; font-weight: 700; }
 .back-link:hover { color: var(--ink); }
 .compact-list { display: grid; }
@@ -176,6 +179,12 @@ h3 { margin-bottom: .3rem; }
 .contact-block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .contact-block span { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .8rem; }
 .empty-copy { color: var(--muted); }
+.archive-details { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.archive-details summary { display: flex; align-items: center; gap: 7px; color: var(--red); cursor: pointer; font-size: .78rem; font-weight: 750; }
+.archive-details > div { display: grid; gap: 11px; margin-top: 12px; padding: 13px; border-radius: 9px; background: #fff3f1; }
+.archive-details p, .restore-student p { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.5; }
+.archive-details .form-error, .restore-student .form-error { color: var(--red); }
+.restore-student { display: grid; gap: 15px; }
 
 .lesson-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .lesson-hero p { margin-bottom: 0; color: var(--muted); }
@@ -302,8 +311,8 @@ h3 { margin-bottom: .3rem; }
 .admin-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .admin-controls .search-row { width: min(360px, 100%); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .filter-tabs { display: flex; gap: 5px; overflow-x: auto; }
-.filter-tabs button { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--muted); background: transparent; cursor: pointer; text-transform: capitalize; font-size: .75rem; font-weight: 700; }
-.filter-tabs button.active { color: var(--forest); border-color: var(--line); background: var(--surface); }
+.filter-tabs button, .filter-tabs a { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--muted); background: transparent; cursor: pointer; text-transform: capitalize; font-size: .75rem; font-weight: 700; }
+.filter-tabs button.active, .filter-tabs a.active { color: var(--forest); border-color: var(--line); background: var(--surface); }
 .filter-tabs span { min-width: 18px; padding: 1px 5px; border-radius: 99px; background: var(--forest-soft); font-size: .62rem; text-align: center; }
 .account-list { display: grid; gap: 9px; }
 .account-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) auto minmax(150px, .8fr) minmax(260px, auto); align-items: center; gap: 15px; padding: 17px 19px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
@@ -380,6 +389,9 @@ h3 { margin-bottom: .3rem; }
   .form-split { grid-template-columns: 1fr; }
   .student-rate { display: none !important; }
   .student-row { grid-template-columns: 43px 1fr; }
+  .student-row .archive-badge { grid-column: 2; justify-self: start; }
+  .profile-hero { align-items: flex-start; flex-wrap: wrap; }
+  .profile-archive-badge { width: 100%; margin-left: 94px; }
   .calendar-day { grid-template-columns: 46px 1fr; gap: 8px; }
   .calendar-event { grid-template-columns: 1fr; }
   .calendar-event .status { display: none; }

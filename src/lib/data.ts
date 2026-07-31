@@ -17,6 +17,7 @@ function mapStudent(row: Record<string, unknown>): Student {
     defaultDurationMinutes: Number(row.default_duration_minutes),
     defaultRateCents: Number(row.default_rate_cents),
     active: Boolean(row.active),
+    deletedAt: row.deleted_at ? String(row.deleted_at) : null,
     syncRevision: Number(row.sync_revision ?? 0),
   };
 }
@@ -35,28 +36,44 @@ function mapLesson(row: Record<string, unknown>): Lesson {
     notes: String(row.notes ?? ""),
     version: Number(row.version),
     syncRevision: Number(row.sync_revision),
-    invoiced: Boolean(row.invoiced),
+    invoiced: Boolean(row.invoiced_at ?? row.invoiced),
   };
 }
 
-export async function getStudents(): Promise<Student[]> {
-  if (!isSupabaseConfigured()) return demoStudents;
+export type StudentStatus = "active" | "archived" | "all";
+
+export async function getStudents(options?: { status?: StudentStatus }): Promise<Student[]> {
+  const status = options?.status ?? "active";
+  if (!isSupabaseConfigured()) {
+    return demoStudents.filter((student) => {
+      if (status === "all") return true;
+      return status === "archived" ? Boolean(student.deletedAt) : student.active && !student.deletedAt;
+    });
+  }
   await requireApprovedUser();
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("students")
     .select("*")
-    .is("deleted_at", null)
     .order("display_name");
+  if (status === "active") query = query.eq("active", true).is("deleted_at", null);
+  if (status === "archived") query = query.not("deleted_at", "is", null);
+  const { data, error } = await query;
   if (error) throw error;
   return (data ?? []).map(mapStudent);
 }
 
-export async function getStudent(id: string) {
-  if (!isSupabaseConfigured()) return demoStudents.find((item) => item.id === id) ?? null;
+export async function getStudent(id: string, options?: { includeArchived?: boolean }) {
+  if (!isSupabaseConfigured()) {
+    const student = demoStudents.find((item) => item.id === id) ?? null;
+    if (!options?.includeArchived && student?.deletedAt) return null;
+    return student;
+  }
   await requireApprovedUser();
   const supabase = await createClient();
-  const { data, error } = await supabase.from("students").select("*").eq("id", id).maybeSingle();
+  let query = supabase.from("students").select("*").eq("id", id);
+  if (!options?.includeArchived) query = query.eq("active", true).is("deleted_at", null);
+  const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return data ? mapStudent(data) : null;
 }
@@ -98,6 +115,7 @@ export async function getLesson(id: string) {
     .from("lessons")
     .select("*, students(display_name)")
     .eq("id", id)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) throw error;
   return data ? mapLesson(data) : null;

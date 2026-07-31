@@ -39,6 +39,17 @@ export const demoStudents: Student[] = [
     active: true,
     syncRevision: 3,
   },
+  {
+    id: "44444444-4444-4444-8444-444444444444",
+    displayName: "Maya Petersen",
+    guardianName: "Renee Petersen",
+    billingEmail: "renee@example.com",
+    defaultDurationMinutes: 60,
+    defaultRateCents: 42000,
+    active: false,
+    deletedAt: subDays(today, 14).toISOString(),
+    syncRevision: 4,
+  },
 ];
 
 export const demoLessons: Lesson[] = [
@@ -81,8 +92,21 @@ export const demoLessons: Lesson[] = [
     version: 1,
     syncRevision: 10,
   },
+  {
+    id: "a4444444-4444-4444-8444-444444444444",
+    studentId: demoStudents[3].id,
+    studentName: demoStudents[3].displayName,
+    startsAt: subDays(today, 18).toISOString(),
+    durationMinutes: 60,
+    rateCents: 42000,
+    status: "attended",
+    billingOverride: "default",
+    notes: "Completed the final revision session and reviewed the exam checklist.",
+    version: 1,
+    syncRevision: 11,
+  },
   ...Array.from({ length: 12 }, (_, index): Lesson => {
-    const student = demoStudents[index % demoStudents.length];
+    const student = demoStudents[index % 3];
     const date = subDays(today, index + 1);
     date.setHours(15 + (index % 3), 0, 0, 0);
     return {

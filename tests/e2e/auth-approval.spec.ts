@@ -210,12 +210,13 @@ test.describe("authenticated account approval", () => {
   test.skip(enabled && missingConfiguration.length > 0, `Missing authenticated E2E configuration: ${missingConfiguration.join(", ")}`);
 
   test("signup, approval, isolation, revocation and password replacement", async ({ browser, page }, testInfo) => {
+    test.setTimeout(120_000);
     test.skip(testInfo.project.name !== "desktop", "The stateful authenticated lifecycle runs once in the desktop project");
 
     const runId = `${Date.now()}-${crypto.randomUUID()}`;
     const emailA = `auth-e2e-a-${runId}@example.test`;
     const emailB = `auth-e2e-b-${runId}@example.test`;
-    const generatedCredential = (label: string) => [label, runId, crypto.randomUUID(), "Aa1!"].join("-");
+    const generatedCredential = (label: string) => [label, crypto.randomUUID(), "Aa1!"].join("-");
     const initialPasswordA = generatedCredential("initial-a");
     const initialPasswordB = generatedCredential("initial-b");
     const finalPasswordA = generatedCredential("changed-a");
@@ -307,7 +308,7 @@ test.describe("authenticated account approval", () => {
       await expect(userBPage.getByText(studentB, { exact: true })).toBeVisible();
       await expect(userBPage.getByText(studentA, { exact: true })).toHaveCount(0);
 
-      const { data: rowsA, error: rowsAError } = await directA.from("students").select("id,display_name");
+      const { data: rowsA, error: rowsAError } = await directA.from("students").select("id,display_name,sync_revision");
       const { data: rowsB, error: rowsBError } = await directB.from("students").select("id,display_name");
       expect(rowsAError).toBeNull();
       expect(rowsBError).toBeNull();
@@ -315,6 +316,129 @@ test.describe("authenticated account approval", () => {
       expect(rowsB?.map(({ display_name }) => display_name)).toEqual([studentB]);
       const { data: crossTenantRows } = await directB.from("students").select("id").eq("id", rowsA![0].id);
       expect(crossTenantRows).toEqual([]);
+
+      const archiveAfterRevision = Number(rowsA![0].sync_revision);
+      const now = Date.now();
+      const pastAttendedAt = new Date(now - 86_400_000).toISOString();
+      const futureScheduledAt = new Date(now + 7 * 86_400_000).toISOString();
+      const futureNoShowAt = new Date(now + 8 * 86_400_000).toISOString();
+      const futureInvoicedAt = new Date(now + 9 * 86_400_000).toISOString();
+      const { data: series, error: seriesError } = await directA.from("lesson_series").insert({
+        owner_id: accountA.user_id,
+        student_id: rowsA![0].id,
+        starts_at_local: "2099-01-01T10:00:00",
+        timezone: "Africa/Johannesburg",
+        frequency: "weekly",
+        weekdays: [1],
+      }).select("id").single();
+      expect(seriesError).toBeNull();
+      const lessonFixtures = [
+        { id: crypto.randomUUID(), starts_at: pastAttendedAt, status: "attended", invoiced_at: null },
+        { id: crypto.randomUUID(), starts_at: futureScheduledAt, status: "scheduled", invoiced_at: null },
+        { id: crypto.randomUUID(), starts_at: futureNoShowAt, status: "no_show", invoiced_at: null },
+        { id: crypto.randomUUID(), starts_at: futureInvoicedAt, status: "scheduled", invoiced_at: new Date(now).toISOString() },
+      ];
+      const { error: lessonFixtureError } = await directA.from("lessons").insert(lessonFixtures.map((lesson, index) => ({
+        ...lesson,
+        owner_id: accountA.user_id,
+        student_id: rowsA![0].id,
+        series_id: series!.id,
+        occurrence_key: lesson.starts_at,
+        duration_minutes: 60,
+        rate_cents: 45000,
+        notes: index === 0 ? "Preserved archive history" : "",
+      })));
+      expect(lessonFixtureError).toBeNull();
+
+      const staleLessonPage = await page.context().newPage();
+      const staleLessonResponse = await staleLessonPage.goto(`/lessons/${lessonFixtures[1].id}`);
+      expect(staleLessonResponse?.status()).toBe(200);
+      await staleLessonPage.getByText("Reschedule this lesson or series", { exact: true }).click();
+      await expect(staleLessonPage.getByRole("button", { name: "Update schedule" })).toBeVisible();
+
+      expect((await directB.rpc("archive_student", { p_student_id: rowsA![0].id })).error).toBeTruthy();
+      expect((await directB.rpc("restore_student", { p_student_id: rowsA![0].id })).error).toBeTruthy();
+
+      await page.goto(`/students/${rowsA![0].id}`);
+      await page.getByText("Archive student", { exact: true }).click();
+      await page.getByRole("button", { name: "Confirm archive" }).click();
+      await expect(page).toHaveURL(/\/students\?view=archived$/);
+      await expect(page.getByText(studentA, { exact: true })).toBeVisible();
+
+      const { data: archivedStudent } = await directA.from("students").select("active,deleted_at").eq("id", rowsA![0].id).single();
+      expect(archivedStudent?.active).toBe(false);
+      expect(archivedStudent?.deleted_at).toBeTruthy();
+      const { data: archivedSeries } = await directA.from("lesson_series").select("active,deleted_at").eq("id", series!.id).single();
+      expect(archivedSeries).toMatchObject({ active: false });
+      expect(archivedSeries?.deleted_at).toBeTruthy();
+      const { data: archivedLessons } = await directA.from("lessons").select("id,status,invoiced_at,deleted_at").in("id", lessonFixtures.map((lesson) => lesson.id));
+      expect(archivedLessons?.find((lesson) => lesson.id === lessonFixtures[0].id)?.deleted_at).toBeNull();
+      expect(archivedLessons?.find((lesson) => lesson.id === lessonFixtures[1].id)?.deleted_at).toBeTruthy();
+      expect(archivedLessons?.find((lesson) => lesson.id === lessonFixtures[2].id)?.deleted_at).toBeNull();
+      expect(archivedLessons?.find((lesson) => lesson.id === lessonFixtures[3].id)?.deleted_at).toBeNull();
+
+      await staleLessonPage.getByLabel("New date and time").fill("2099-01-02T10:00");
+      await staleLessonPage.getByRole("button", { name: "Update schedule" }).click();
+      await expect.poll(async () => {
+        const { data, error } = await directA
+          .from("lessons")
+          .select("starts_at,deleted_at")
+          .eq("id", lessonFixtures[1].id)
+          .single();
+        if (error) throw error;
+        return {
+          startsAt: new Date(data.starts_at).toISOString(),
+          deleted: Boolean(data.deleted_at),
+        };
+      }).toEqual({ startsAt: futureScheduledAt, deleted: true });
+      await staleLessonPage.close();
+
+      const archivedLessonResponse = await page.goto(`/lessons/${lessonFixtures[1].id}`);
+      expect(archivedLessonResponse?.status()).toBe(404);
+      await expect(page.getByRole("button", { name: "Save lesson" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Update schedule" })).toHaveCount(0);
+
+      const preservedNoShowResponse = await page.goto(`/lessons/${lessonFixtures[2].id}`);
+      expect(preservedNoShowResponse?.status()).toBe(200);
+      await expect(page.getByRole("button", { name: "Save lesson" })).toBeVisible();
+      const preservedInvoicedResponse = await page.goto(`/lessons/${lessonFixtures[3].id}`);
+      expect(preservedInvoicedResponse?.status()).toBe(200);
+      await expect(page.getByRole("button", { name: "Save lesson" })).toBeVisible();
+
+      await page.goto("/calendar");
+      await expect(page.getByLabel("Student").locator("option", { hasText: studentA })).toHaveCount(0);
+      await page.goto("/invoices/new?kind=student");
+      await expect(page.getByLabel("Student").locator("option", { hasText: `${studentA} (Archived)` })).toHaveCount(1);
+
+      const archivedSyncResponse = await page.context().request.get(`/api/sync?after=${archiveAfterRevision}`);
+      expect(archivedSyncResponse.status()).toBe(200);
+      const archivedSync = await archivedSyncResponse.json();
+      expect(archivedSync.tombstones).toEqual(expect.arrayContaining([
+        { entity: "student", id: rowsA![0].id },
+        { entity: "lesson", id: lessonFixtures[1].id },
+      ]));
+
+      await page.goto(`/students/${rowsA![0].id}`);
+      await page.getByRole("button", { name: "Restore student" }).click();
+      await expect(page).toHaveURL(new RegExp(`/students/${rowsA![0].id}$`));
+      await expect(page.getByText("Archive student", { exact: true })).toBeVisible();
+      const { data: restoredStudent } = await directA.from("students").select("active,deleted_at").eq("id", rowsA![0].id).single();
+      expect(restoredStudent).toEqual({ active: true, deleted_at: null });
+      const { data: stillArchivedSeries } = await directA.from("lesson_series").select("active,deleted_at").eq("id", series!.id).single();
+      expect(stillArchivedSeries?.active).toBe(false);
+      expect(stillArchivedSeries?.deleted_at).toBeTruthy();
+      const { data: stillDeletedLesson } = await directA.from("lessons").select("starts_at,deleted_at").eq("id", lessonFixtures[1].id).single();
+      expect(stillDeletedLesson?.deleted_at).toBeTruthy();
+      expect(new Date(stillDeletedLesson!.starts_at).toISOString()).toBe(futureScheduledAt);
+      const restoredArchivedLessonResponse = await page.goto(`/lessons/${lessonFixtures[1].id}`);
+      expect(restoredArchivedLessonResponse?.status()).toBe(404);
+
+      const restoredSyncResponse = await page.context().request.get(`/api/sync?after=${archivedSync.revision}`);
+      expect(restoredSyncResponse.status()).toBe(200);
+      const restoredSync = await restoredSyncResponse.json();
+      expect(restoredSync.students.some((student: { id: string }) => student.id === rowsA![0].id)).toBe(true);
+      await page.goto("/calendar");
+      await expect(page.getByLabel("Student").locator("option", { hasText: studentA })).toHaveCount(1);
 
       const databaseA = `teachnotes-user-${accountA.user_id}`;
       await expect.poll(() => page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBe(accountA.user_id);
@@ -332,8 +456,9 @@ test.describe("authenticated account approval", () => {
       await expect(page).toHaveURL(/\/today$/);
 
       const temporaryPassword = await resetPasswordFromAdmin(adminPage, admin, emailA);
-      await page.goto("/today");
+      await signIn(page, emailA, temporaryPassword);
       await expect(page).toHaveURL(/\/change-password$/);
+      await page.reload();
       await page.getByLabel("Temporary or current password").fill(temporaryPassword);
       await page.getByLabel("New password", { exact: true }).fill(finalPasswordA);
       await page.getByLabel("Confirm new password").fill(finalPasswordA);
@@ -343,7 +468,7 @@ test.describe("authenticated account approval", () => {
       await expect.poll(async () => (await accountByEmail(admin, emailA))?.must_change_password).toBe(false);
 
       await page.goto("/settings");
-      await page.getByRole("button", { name: /Sign out and clear this device/ }).click();
+      await page.getByRole("main").getByRole("button", { name: /Sign out and clear this device/ }).click();
       await expect(page).toHaveURL(/\/login$/);
       await expect.poll(() => databaseRecordExists(page, databaseA, "students", rowsA![0].id)).toBe(false);
 

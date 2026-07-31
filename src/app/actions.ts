@@ -33,6 +33,16 @@ const studentSchema = z.object({
   defaultRateRand: z.coerce.number().min(0),
 });
 
+export type StudentArchiveState = { message: string };
+
+function revalidateStudentArchivePaths(studentId: string) {
+  revalidatePath("/students");
+  revalidatePath(`/students/${studentId}`);
+  revalidatePath("/today");
+  revalidatePath("/calendar");
+  revalidatePath("/invoices/new");
+}
+
 export async function createStudent(formData: FormData) {
   if (!isSupabaseConfigured()) { revalidatePath("/students"); return; }
   const user = await requireUser();
@@ -49,6 +59,30 @@ export async function createStudent(formData: FormData) {
   });
   if (error) throw error;
   revalidatePath("/students");
+}
+
+export async function archiveStudent(_previousState: StudentArchiveState, formData: FormData): Promise<StudentArchiveState> {
+  if (!isSupabaseConfigured()) return { message: "Student archiving is unavailable in the portfolio demo." };
+  const parsed = z.string().uuid().safeParse(formData.get("studentId"));
+  if (!parsed.success) return { message: "We couldn’t archive this student. Refresh the page and try again." };
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("archive_student", { p_student_id: parsed.data });
+  if (error) return { message: "We couldn’t archive this student. Nothing was changed." };
+  revalidateStudentArchivePaths(parsed.data);
+  redirect("/students?view=archived");
+}
+
+export async function restoreStudent(_previousState: StudentArchiveState, formData: FormData): Promise<StudentArchiveState> {
+  if (!isSupabaseConfigured()) return { message: "Student restoration is unavailable in the portfolio demo." };
+  const parsed = z.string().uuid().safeParse(formData.get("studentId"));
+  if (!parsed.success) return { message: "We couldn’t restore this student. Refresh the page and try again." };
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("restore_student", { p_student_id: parsed.data });
+  if (error) return { message: "We couldn’t restore this student. Nothing was changed." };
+  revalidateStudentArchivePaths(parsed.data);
+  redirect(`/students/${parsed.data}`);
 }
 
 export async function createLessonSeries(formData: FormData) {
@@ -82,17 +116,52 @@ export async function rescheduleLesson(formData: FormData) {
   const nextLocal = z.string().min(10).parse(formData.get("startsAtLocal"));
   const scope = z.enum(["one", "following", "all_future"]).parse(formData.get("scope"));
   const supabase = await createClient();
-  const { data: current, error } = await supabase.from("lessons").select("id, series_id, starts_at").eq("id", lessonId).single();
+  const { data: current, error } = await supabase
+    .from("lessons")
+    .select("id, series_id, starts_at")
+    .eq("id", lessonId)
+    .is("deleted_at", null)
+    .maybeSingle();
   if (error) throw error;
+  if (!current) {
+    revalidatePath(`/lessons/${lessonId}`);
+    revalidatePath("/calendar");
+    revalidatePath("/today");
+    return;
+  }
   const next = fromZonedTime(nextLocal, "Africa/Johannesburg");
   if (scope === "one" || !current.series_id) {
-    await supabase.from("lessons").update({ starts_at: next.toISOString(), status: "scheduled" }).eq("id", lessonId).is("invoiced_at", null);
+    const { error: updateError } = await supabase
+      .from("lessons")
+      .update({ starts_at: next.toISOString(), status: "scheduled" })
+      .eq("id", lessonId)
+      .is("invoiced_at", null)
+      .is("deleted_at", null);
+    if (updateError) throw updateError;
   } else {
     const threshold = scope === "following" ? current.starts_at : new Date().toISOString();
     const delta = next.getTime() - new Date(current.starts_at).getTime();
-    const { data: future, error: futureError } = await supabase.from("lessons").select("id, starts_at").eq("series_id", current.series_id).eq("status", "scheduled").is("invoiced_at", null).gte("starts_at", threshold).order("starts_at");
+    const { data: future, error: futureError } = await supabase
+      .from("lessons")
+      .select("id, starts_at")
+      .eq("series_id", current.series_id)
+      .eq("status", "scheduled")
+      .is("invoiced_at", null)
+      .is("deleted_at", null)
+      .gte("starts_at", threshold)
+      .order("starts_at");
     if (futureError) throw futureError;
-    await Promise.all((future ?? []).map((item) => supabase.from("lessons").update({ starts_at: new Date(new Date(item.starts_at).getTime() + delta).toISOString() }).eq("id", item.id)));
+    const results = await Promise.all(
+      (future ?? []).map((item) =>
+        supabase
+          .from("lessons")
+          .update({ starts_at: new Date(new Date(item.starts_at).getTime() + delta).toISOString() })
+          .eq("id", item.id)
+          .is("deleted_at", null),
+      ),
+    );
+    const updateError = results.find((result) => result.error)?.error;
+    if (updateError) throw updateError;
   }
   revalidatePath(`/lessons/${lessonId}`);
   revalidatePath("/calendar");
@@ -107,7 +176,7 @@ export async function updateStudentDefaults(formData: FormData) {
   const rateCents = Math.round(z.coerce.number().min(0).parse(formData.get("rateRand")) * 100);
   const applyFuture = formData.get("applyFuture") === "on";
   const supabase = await createClient();
-  const { error } = await supabase.from("students").update({ default_duration_minutes: duration, default_rate_cents: rateCents }).eq("id", studentId);
+  const { error } = await supabase.from("students").update({ default_duration_minutes: duration, default_rate_cents: rateCents }).eq("id", studentId).is("deleted_at", null);
   if (error) throw error;
   if (applyFuture) await supabase.from("lessons").update({ duration_minutes: duration, rate_cents: rateCents }).eq("student_id", studentId).eq("status", "scheduled").is("invoiced_at", null).gt("starts_at", new Date().toISOString());
   revalidatePath(`/students/${studentId}`);
@@ -133,7 +202,7 @@ export async function finalizeInvoice(formData: FormData) {
   const { lessons, totalCents } = await getInvoicePreview(month, studentId);
   if (!lessons.length) throw new Error("There are no uninvoiced billable lessons in this selection");
   const settings = await getBusinessSettings();
-  const student = studentId ? await getStudent(studentId) : null;
+  const student = studentId ? await getStudent(studentId, { includeArchived: true }) : null;
   const recipient = kind === "consolidated" ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress } : { name: student?.guardianName || student?.displayName || "Client", email: student?.billingEmail || "", address: student?.billingAddress || "" };
   const periodStart = new Date(`${month}-01T00:00:00+02:00`);
   const periodEnd = endOfMonth(periodStart);
@@ -167,7 +236,7 @@ export async function saveDraftInvoice(formData: FormData) {
   const [{ totalCents }, settings, student] = await Promise.all([
     getInvoicePreview(month, studentId),
     getBusinessSettings(),
-    studentId ? getStudent(studentId) : Promise.resolve(null),
+    studentId ? getStudent(studentId, { includeArchived: true }) : Promise.resolve(null),
   ]);
   const recipient = kind === "consolidated"
     ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress }

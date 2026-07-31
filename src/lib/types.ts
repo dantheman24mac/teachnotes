@@ -18,6 +18,7 @@ export interface Student {
   defaultDurationMinutes: number;
   defaultRateCents: number;
   active: boolean;
+  deletedAt?: string | null;
   syncRevision?: number;
 }
 
