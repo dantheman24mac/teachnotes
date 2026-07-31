@@ -93,8 +93,15 @@ export async function rescheduleLesson(formData: FormData) {
     .from("lessons")
     .select("id, series_id, starts_at")
     .eq("id", lessonId)
-    .single();
+    .is("deleted_at", null)
+    .maybeSingle();
   if (error) throw error;
+  if (!current) {
+    revalidatePath(`/lessons/${lessonId}`);
+    revalidatePath("/calendar");
+    revalidatePath("/today");
+    return;
+  }
 
   const next = fromZonedTime(nextLocal, settings.timezone);
   if (scope === "one" || !current.series_id) {
@@ -102,7 +109,8 @@ export async function rescheduleLesson(formData: FormData) {
       .from("lessons")
       .update({ starts_at: next.toISOString(), status: "scheduled" })
       .eq("id", lessonId)
-      .is("invoiced_at", null);
+      .is("invoiced_at", null)
+      .is("deleted_at", null);
     if (updateError) throw updateError;
   } else {
     const threshold = scope === "following" ? current.starts_at : new Date().toISOString();
@@ -113,6 +121,7 @@ export async function rescheduleLesson(formData: FormData) {
       .eq("series_id", current.series_id)
       .eq("status", "scheduled")
       .is("invoiced_at", null)
+      .is("deleted_at", null)
       .gte("starts_at", threshold)
       .order("starts_at");
     if (futureError) throw futureError;
@@ -122,7 +131,8 @@ export async function rescheduleLesson(formData: FormData) {
         supabase
           .from("lessons")
           .update({ starts_at: new Date(new Date(item.starts_at).getTime() + delta).toISOString() })
-          .eq("id", item.id),
+          .eq("id", item.id)
+          .is("deleted_at", null),
       ),
     );
     const updateError = results.find((result) => result.error)?.error;

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+test.describe.configure({ mode: "serial" });
+
 test("tutor can navigate the demo lesson workflow", async ({ page }) => {
   await page.goto("/today");
   await expect(page.getByLabel("Portfolio demo information")).toContainText("Synthetic portfolio demo");
@@ -14,6 +16,31 @@ test("tutor can navigate the demo lesson workflow", async ({ page }) => {
   await page.getByRole("link", { name: /Liam Jacobs/ }).click();
   await expect(page.getByRole("heading", { name: "Liam Jacobs" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /Previous lesson notes/ })).toBeVisible();
+  await expect(page.getByText("Archive student", { exact: true })).toBeVisible();
+});
+
+test("student directory separates active and archived profiles", async ({ page }) => {
+  await page.goto("/students");
+  await expect(page).toHaveURL(/\/students$/);
+  await expect(page.getByRole("link", { name: /Active 3/ })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("Liam Jacobs", { exact: true })).toBeVisible();
+  await expect(page.getByText("Maya Petersen", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("link", { name: /Archived 1/ }).click();
+  await expect(page).toHaveURL(/\/students\?view=archived$/);
+  await expect(page.getByText("Maya Petersen", { exact: true })).toBeVisible();
+  await expect(page.getByText("Liam Jacobs", { exact: true })).toHaveCount(0);
+
+  const search = page.getByLabel("Search archived students");
+  await search.fill("not a student");
+  await expect(page.getByRole("heading", { name: "No matching students" })).toBeVisible();
+  await search.fill("Maya");
+  await page.getByRole("link", { name: /Maya Petersen/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Maya Petersen" })).toBeVisible();
+  await expect(page.getByText(/Archived \d/)).toBeVisible();
+  await expect(page.getByText("Completed the final revision session and reviewed the exam checklist.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Restore student" })).toBeVisible();
 });
 
 test("invoice preview groups billable lessons", async ({ page }) => {
@@ -21,6 +48,8 @@ test("invoice preview groups billable lessons", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "New invoice" })).toBeVisible();
   await expect(page.getByText("Invoice total")).toBeVisible();
   await expect(page.getByRole("button", { name: "Finalize & create PDF" })).toBeVisible();
+  await page.getByLabel("Invoice type").selectOption("student");
+  await expect(page.getByLabel("Student").locator("option", { hasText: "Maya Petersen (Archived)" })).toHaveCount(1);
 });
 
 test("today remains readable after the network drops", async ({ page, context }) => {
