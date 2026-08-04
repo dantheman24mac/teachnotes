@@ -550,7 +550,10 @@ test.describe("authenticated account approval", () => {
       }).select("id").single();
       expect(studentError).toBeNull();
 
-      const targetDate = new Date(Date.now() - 2 * 86_400_000);
+      const targetDate = new Date();
+      targetDate.setUTCDate(15);
+      targetDate.setUTCMonth(targetDate.getUTCMonth() - 1);
+      targetDate.setUTCHours(10, 0, 0, 0);
       const monthParts = new Intl.DateTimeFormat("en-ZA", {
         timeZone: "Africa/Johannesburg",
         year: "numeric",
@@ -588,6 +591,7 @@ test.describe("authenticated account approval", () => {
       await page.goto(`/lessons/${targetLessonId}`);
       await expect(page.getByRole("heading", { name: studentName })).toBeVisible();
       await expect(page.getByRole("button", { name: "Connection and synchronization status" })).toContainText("Synced");
+      await expect.poll(() => page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBe(userId);
       await page.evaluate(() => localStorage.removeItem("teachnotes-active-user"));
       expect(await page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBeNull();
 
