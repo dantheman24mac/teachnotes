@@ -8,10 +8,12 @@ const serviceKey = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVI
 const adminEmail = process.env.AUTH_E2E_ADMIN_EMAIL ?? "";
 const adminPassword = process.env.AUTH_E2E_ADMIN_PASSWORD ?? "";
 const appBaseUrl = process.env.AUTH_E2E_BASE_URL ?? "http://localhost:3000";
-const missingConfiguration = [
+const missingServiceConfiguration = [
   ["NEXT_PUBLIC_SUPABASE_URL", supabaseUrl],
   ["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", publishableKey],
   ["SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY", serviceKey],
+].filter(([, value]) => !value).map(([name]) => name);
+const missingAdminConfiguration = [
   ["AUTH_E2E_ADMIN_EMAIL", adminEmail],
   ["AUTH_E2E_ADMIN_PASSWORD", adminPassword],
 ].filter(([, value]) => !value).map(([name]) => name);
@@ -207,11 +209,12 @@ async function databaseRecordExists(page: Page, databaseName: string, storeName:
 
 test.describe("authenticated account approval", () => {
   test.skip(!enabled, "Set AUTH_E2E=true to run authenticated Supabase coverage");
-  test.skip(enabled && missingConfiguration.length > 0, `Missing authenticated E2E configuration: ${missingConfiguration.join(", ")}`);
+  test.skip(enabled && missingServiceConfiguration.length > 0, `Missing authenticated E2E configuration: ${missingServiceConfiguration.join(", ")}`);
 
   test("signup, approval, isolation, revocation and password replacement", async ({ browser, page }, testInfo) => {
     test.setTimeout(120_000);
     test.skip(testInfo.project.name !== "desktop", "The stateful authenticated lifecycle runs once in the desktop project");
+    test.skip(missingAdminConfiguration.length > 0, `Missing authenticated admin configuration: ${missingAdminConfiguration.join(", ")}`);
 
     const runId = `${Date.now()}-${crypto.randomUUID()}`;
     const emailA = `auth-e2e-a-${runId}@example.test`;
@@ -494,6 +497,119 @@ test.describe("authenticated account approval", () => {
         const user = await findAuthUser(admin, email).catch(() => null);
         if (user) await admin.auth.admin.deleteUser(user.id).catch(() => undefined);
       }
+    }
+  });
+
+  test("lesson detail attendance syncs without the browser active-user marker and becomes invoice eligible", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    test.skip(testInfo.project.name !== "desktop", "The authenticated lesson sync regression runs once in the desktop project");
+
+    const runId = `${Date.now()}-${crypto.randomUUID()}`;
+    const email = `lesson-sync-e2e-${runId}@example.test`;
+    const password = ["lesson-sync", crypto.randomUUID(), "Aa1!"].join("-");
+    const admin = serviceClient();
+    let userId: string | null = null;
+
+    try {
+      const { data: created, error: createError } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+      expect(createError).toBeNull();
+      expect(created.user).not.toBeNull();
+      userId = created.user!.id;
+
+      const { error: accountError } = await admin.from("accounts").upsert({
+        user_id: userId,
+        email,
+        role: "user",
+        status: "approved",
+        must_change_password: false,
+        is_protected: false,
+        reviewed_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      expect(accountError).toBeNull();
+      const { error: settingsError } = await admin.from("business_settings").upsert({
+        owner_id: userId,
+        tutor_email: email,
+      }, { onConflict: "owner_id" });
+      expect(settingsError).toBeNull();
+
+      await signIn(page, email, password);
+      await expect(page).toHaveURL(/\/today$/);
+      const token = await accessToken(page.context());
+      const direct = userClient(token);
+
+      const studentName = `Invoice eligibility ${runId}`;
+      const { data: student, error: studentError } = await direct.from("students").insert({
+        owner_id: userId,
+        display_name: studentName,
+        default_duration_minutes: 60,
+        default_rate_cents: 45000,
+      }).select("id").single();
+      expect(studentError).toBeNull();
+
+      const targetDate = new Date(Date.now() - 2 * 86_400_000);
+      const monthParts = new Intl.DateTimeFormat("en-ZA", {
+        timeZone: "Africa/Johannesburg",
+        year: "numeric",
+        month: "2-digit",
+      }).formatToParts(targetDate);
+      const year = monthParts.find(({ type }) => type === "year")!.value;
+      const monthNumber = monthParts.find(({ type }) => type === "month")!.value;
+      const invoiceMonth = `${year}-${monthNumber}`;
+      const withinMonth = (hoursBeforeTarget: number) => new Date(targetDate.getTime() - hoursBeforeTarget * 3_600_000).toISOString();
+      const outOfMonthDate = new Date(targetDate);
+      outOfMonthDate.setUTCDate(15);
+      outOfMonthDate.setUTCMonth(outOfMonthDate.getUTCMonth() - 1);
+      const futureScheduledDate = new Date(Date.now() + 7 * 86_400_000);
+      const targetLessonId = crypto.randomUUID();
+      const fixtureLessons = [
+        { id: targetLessonId, starts_at: targetDate.toISOString(), duration_minutes: 41, status: "scheduled", invoiced_at: null, deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: withinMonth(2), duration_minutes: 42, status: "no_show", invoiced_at: null, deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: withinMonth(4), duration_minutes: 51, status: "scheduled", invoiced_at: null, deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: futureScheduledDate.toISOString(), duration_minutes: 52, status: "scheduled", invoiced_at: null, deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: withinMonth(6), duration_minutes: 53, status: "attended", invoiced_at: new Date().toISOString(), deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: withinMonth(8), duration_minutes: 54, status: "attended", invoiced_at: null, deleted_at: new Date().toISOString() },
+        { id: crypto.randomUUID(), starts_at: withinMonth(10), duration_minutes: 55, status: "canceled_rescheduled", invoiced_at: null, deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: outOfMonthDate.toISOString(), duration_minutes: 56, status: "attended", invoiced_at: null, deleted_at: null },
+      ];
+      const { error: lessonError } = await direct.from("lessons").insert(fixtureLessons.map((lesson) => ({
+        ...lesson,
+        owner_id: userId,
+        student_id: student!.id,
+        rate_cents: 45000,
+        billing_override: "default",
+        notes: "",
+      })));
+      expect(lessonError).toBeNull();
+
+      await page.goto(`/lessons/${targetLessonId}`);
+      await expect(page.getByRole("heading", { name: studentName })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Connection and synchronization status" })).toContainText("Synced");
+      await page.evaluate(() => localStorage.removeItem("teachnotes-active-user"));
+      expect(await page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBeNull();
+
+      await page.getByRole("group", { name: "Attendance" }).getByRole("button", { name: /Attended/ }).click();
+      await page.getByRole("button", { name: "Save lesson" }).click();
+      await expect.poll(async () => {
+        const { data, error } = await direct.from("lessons").select("status").eq("id", targetLessonId).single();
+        if (error) throw error;
+        return data.status;
+      }).toBe("attended");
+      expect(await page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBeNull();
+
+      await page.goto(`/invoices/new?month=${invoiceMonth}&kind=student&student=${student!.id}`);
+      const preview = page.locator(".invoice-preview");
+      await expect(preview.getByText("2 eligible lessons", { exact: true })).toBeVisible();
+      await expect(preview.getByText("41 min", { exact: true })).toBeVisible();
+      await expect(preview.getByText("42 min", { exact: true })).toBeVisible();
+      for (const duration of [51, 52, 53, 54, 55, 56]) {
+        await expect(preview.getByText(`${duration} min`, { exact: true })).toHaveCount(0);
+      }
+    } finally {
+      if (userId) await admin.auth.admin.deleteUser(userId).catch(() => undefined);
     }
   });
 });
