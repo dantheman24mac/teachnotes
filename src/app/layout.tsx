@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
 import "./globals.css";
+import { isStagingEnvironment } from "@/lib/runtime-environment";
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -12,11 +13,16 @@ const fraunces = Fraunces({
   subsets: ["latin"],
 });
 
+const staging = isStagingEnvironment();
+
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
-  title: { default: "TeachNotes", template: "%s · TeachNotes" },
+  title: staging
+    ? { default: "STAGING · TeachNotes", template: "%s · STAGING · TeachNotes" }
+    : { default: "TeachNotes", template: "%s · TeachNotes" },
   description: "Lesson notes, attendance, scheduling and invoicing for independent tutors.",
-  applicationName: "TeachNotes",
+  applicationName: staging ? "TeachNotes Staging" : "TeachNotes",
+  robots: staging ? { index: false, follow: false, noarchive: true } : undefined,
   openGraph: {
     type: "website",
     title: "TeachNotes",
@@ -34,7 +40,14 @@ export default function RootLayout({
       lang="en"
       className={`${dmSans.variable} ${fraunces.variable} h-full antialiased`}
     >
-      <body>{children}</body>
+      <body>
+        {staging ? (
+          <div className="staging-banner" role="status">
+            STAGING · FICTIONAL TEST DATA · NOT PRODUCTION
+          </div>
+        ) : null}
+        {children}
+      </body>
     </html>
   );
 }
