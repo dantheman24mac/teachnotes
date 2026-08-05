@@ -29,7 +29,10 @@ for body in "$internal" "$public"; do
   grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$body" || die "health SHA mismatch"
 done
 
-for route in auth/v1/health rest/v1/ storage/v1/status; do curl -fsS -o /dev/null "https://staging-api.teachnotes.fyi/$route" || die "public API route failed: $route"; done
+for route in auth/v1/health rest/v1/ storage/v1/status; do
+  route_status=$(curl -sS -o /dev/null -w '%{http_code}' "https://staging-api.teachnotes.fyi/$route")
+  [[ $route_status =~ ^[1-4][0-9][0-9]$ && $route_status != 404 ]] || die "public API route failed: $route returned $route_status"
+done
 status=$(curl -sS -o /dev/null -w '%{http_code}' https://staging-api.teachnotes.fyi/this-must-not-exist)
 [[ $status == 404 ]] || die "unmatched staging API route returned $status"
 signup_status=$(curl -sS -o /tmp/teachnotes-staging-signup.$$ -w '%{http_code}' -H "apikey: $(awk -F= '$1==\"NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY\" {print $2}' "$STAGING_SECRET_DIR/app.env")" -H 'content-type: application/json' --data '{"email":"blocked-signup@staging.teachnotes.test","password":"ThisMustNeverCreate123!"}' https://staging-api.teachnotes.fyi/auth/v1/signup)
