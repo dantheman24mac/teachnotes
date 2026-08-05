@@ -48,7 +48,12 @@ async function ensureUser(email, password) {
     const data = await request(`/auth/v1/admin/users?page=${page}&per_page=100`);
     const users = data.users ?? [];
     const found = users.find((user) => user.email?.toLowerCase() === email.toLowerCase());
-    if (found) return found;
+    if (found) {
+      return request(`/auth/v1/admin/users/${found.id}`, {
+        method: "PUT",
+        body: { password, email_confirm: true },
+      });
+    }
     if (users.length < 100) break;
     page += 1;
   }

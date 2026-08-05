@@ -61,7 +61,7 @@ if ! grep -q '^TEACHNOTES_STAGING_INITIALIZED=true$' "$STAGING_SUPABASE_DIR/.env
   set_env "$STAGING_SUPABASE_DIR/.env" SITE_URL https://staging.teachnotes.fyi
   set_env "$STAGING_SUPABASE_DIR/.env" ADDITIONAL_REDIRECT_URLS https://staging.teachnotes.fyi/**
   set_env "$STAGING_SUPABASE_DIR/.env" DISABLE_SIGNUP true
-  set_env "$STAGING_SUPABASE_DIR/.env" ENABLE_EMAIL_SIGNUP false
+  set_env "$STAGING_SUPABASE_DIR/.env" ENABLE_EMAIL_SIGNUP true
   set_env "$STAGING_SUPABASE_DIR/.env" ENABLE_EMAIL_AUTOCONFIRM true
   set_env "$STAGING_SUPABASE_DIR/.env" ENABLE_PHONE_SIGNUP false
   set_env "$STAGING_SUPABASE_DIR/.env" ENABLE_PHONE_AUTOCONFIRM false
@@ -73,6 +73,12 @@ if ! grep -q '^TEACHNOTES_STAGING_INITIALIZED=true$' "$STAGING_SUPABASE_DIR/.env
   set_env "$STAGING_SUPABASE_DIR/.env" TURNSTILE_SECRET_KEY "$TURNSTILE_SECRET_KEY"
   set_env "$STAGING_SUPABASE_DIR/.env" TEACHNOTES_STAGING_INITIALIZED true
 fi
+
+# GoTrue's email-provider switch controls password grants as well as signup.
+# Keep the provider enabled for admin-created test users while the separate
+# disable-signup switch rejects all public account creation.
+set_env "$STAGING_SUPABASE_DIR/.env" DISABLE_SIGNUP true
+set_env "$STAGING_SUPABASE_DIR/.env" ENABLE_EMAIL_SIGNUP true
 
 publishable=$(awk -F= '$1=="SUPABASE_PUBLISHABLE_KEY" {sub(/^[^=]*=/, ""); print; exit}' "$STAGING_SUPABASE_DIR/.env")
 secret_key=$(awk -F= '$1=="SUPABASE_SECRET_KEY" {sub(/^[^=]*=/, ""); print; exit}' "$STAGING_SUPABASE_DIR/.env")
