@@ -22,18 +22,19 @@ const adminHeaders = {
   "Content-Type": "application/json",
 };
 
-async function request(path, { method = "GET", body, allowStatuses = [] } = {}) {
+async function request(path, { method = "GET", body, allowStatuses = [], allowMessages = [] } = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: adminHeaders,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok && !allowStatuses.includes(response.status)) {
+  if (!response.ok) {
     let message = response.statusText;
     try {
       const detail = await response.json();
       message = detail.message ?? detail.msg ?? detail.error ?? message;
     } catch {}
+    if (allowStatuses.includes(response.status) || allowMessages.some((pattern) => pattern.test(message))) return null;
     throw new Error(`${method} ${path} failed (${response.status}): ${message}`);
   }
   if (response.status === 204 || response.headers.get("content-length") === "0") return null;
@@ -80,7 +81,7 @@ const tutor = await ensureUser(required("STAGING_TUTOR_EMAIL"), required("STAGIN
 const reviewedAt = new Date().toISOString();
 
 await restUpsert("accounts", [
-  { user_id: admin.id, email: admin.email, role: "admin", status: "approved", must_change_password: false, is_protected: true, reviewed_at: reviewedAt },
+  { user_id: admin.id, email: admin.email, role: "admin", status: "approved", must_change_password: false, is_protected: true, reviewed_at: reviewedAt, reviewed_by: null },
   { user_id: tutor.id, email: tutor.email, role: "user", status: "approved", must_change_password: false, is_protected: false, reviewed_at: reviewedAt, reviewed_by: admin.id },
 ]);
 
@@ -114,7 +115,7 @@ const iso = (days, hour = 14) => {
 await restUpsert("students", [
   { id: activeId, owner_id: admin.id, display_name: "Liam Staging", guardian_name: "Morgan Example", billing_email: "morgan@staging.teachnotes.test", billing_address: "10 Fictional Road", default_duration_minutes: 60, default_rate_cents: 45000, active: true, deleted_at: null },
   { id: secondId, owner_id: admin.id, display_name: "Amahle Staging", guardian_name: "Taylor Example", billing_email: "taylor@staging.teachnotes.test", billing_address: "20 Fictional Road", default_duration_minutes: 45, default_rate_cents: 38000, active: true, deleted_at: null },
-  { id: archivedId, owner_id: admin.id, display_name: "Archived Staging Student", guardian_name: "Casey Example", billing_email: "casey@staging.teachnotes.test", default_duration_minutes: 60, default_rate_cents: 40000, active: false, deleted_at: iso(-30) },
+  { id: archivedId, owner_id: admin.id, display_name: "Archived Staging Student", guardian_name: "Casey Example", billing_email: "casey@staging.teachnotes.test", billing_address: "30 Fictional Road", default_duration_minutes: 60, default_rate_cents: 40000, active: false, deleted_at: iso(-30) },
 ]);
 
 const seriesId = "52000000-0000-4000-8000-000000000001";
@@ -140,6 +141,7 @@ await request("/storage/v1/bucket", {
     allowed_mime_types: ["application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
   },
   allowStatuses: [409],
+  allowMessages: [/already exists/i],
 });
 
 process.stdout.write("Staging users and fictional fixtures are ready.\n");
