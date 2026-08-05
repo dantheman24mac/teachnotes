@@ -36,6 +36,25 @@ require_commands() {
   for command_name in "$@"; do command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"; done
 }
 
+# Supabase CLI releases have regressed local sslmode=disable handling unless the
+# debug execution path is active (supabase/cli#4288). Keep that stream private:
+# it can include a database URL, so never emit it into CI or deployment logs.
+run_pinned_supabase() {
+  local cli=$1
+  shift
+  local debug_log status
+  umask 077
+  debug_log=$(mktemp /tmp/teachnotes-staging-supabase-cli.XXXXXX)
+  if NEXT_TELEMETRY_DISABLED=1 SUPABASE_TELEMETRY_DISABLED=1 "$cli" "$@" --debug 2>"$debug_log"; then
+    rm -f "$debug_log"
+    return 0
+  else
+    status=$?
+    rm -f "$debug_log"
+    return "$status"
+  fi
+}
+
 production_healthy() {
   local body
   body=$(curl -fsS --retry 3 --retry-delay 2 "$PRODUCTION_HEALTH_URL") || return 1

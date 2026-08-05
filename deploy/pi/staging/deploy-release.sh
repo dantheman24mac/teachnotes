@@ -44,10 +44,10 @@ supabase_cli="$repo/node_modules/.bin/supabase"
 [[ -x $supabase_cli ]] || die "repository-pinned Supabase CLI is unavailable"
 
 printf 'Dry-running staging migrations for %s...\n' "$sha"
-NEXT_TELEMETRY_DISABLED=1 SUPABASE_TELEMETRY_DISABLED=1 "$supabase_cli" db push --dry-run --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR"
+run_pinned_supabase "$supabase_cli" db push --dry-run --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR" || die "staging migration dry run failed"
 printf 'Applying pending migrations only to staging...\n'
-NEXT_TELEMETRY_DISABLED=1 SUPABASE_TELEMETRY_DISABLED=1 "$supabase_cli" db push --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR"
-NEXT_TELEMETRY_DISABLED=1 SUPABASE_TELEMETRY_DISABLED=1 "$supabase_cli" migration list --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR" >/dev/null
+run_pinned_supabase "$supabase_cli" db push --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR" || die "staging migration apply failed"
+run_pinned_supabase "$supabase_cli" migration list --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR" >/dev/null || die "staging migration history verification failed"
 
 printf 'Building isolated staging web image...\n'
 app_compose build web
