@@ -75,9 +75,17 @@ done
 [[ $healthy == true ]] || rollback "internal health did not report the requested staging SHA"
 
 app_compose up -d --no-deps cloudflared
-public_body=$(curl -fsS --retry 8 --retry-delay 3 "$STAGING_HEALTH_URL") || rollback "public staging health failed"
-grep -Eq '"environment"[[:space:]]*:[[:space:]]*"staging"' <<<"$public_body" || rollback "public environment mismatch"
-grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$public_body" || rollback "public SHA mismatch"
+public_healthy=false
+for _ in $(seq 1 20); do
+  public_body=$(curl -fsS "$STAGING_HEALTH_URL" 2>/dev/null || true)
+  if grep -Eq '"environment"[[:space:]]*:[[:space:]]*"staging"' <<<"$public_body" &&
+     grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$public_body"; then
+    public_healthy=true
+    break
+  fi
+  sleep 3
+done
+[[ $public_healthy == true ]] || rollback "public staging health did not report the requested environment and SHA"
 
 deployed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 production_after=$(production_fingerprint) || die "could not fingerprint production after staging release"
