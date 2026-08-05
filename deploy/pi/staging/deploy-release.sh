@@ -33,12 +33,13 @@ remote_sha=$(git -C "$repo" rev-parse "refs/remotes/origin/${branch}^{commit}")
 approval_file="$STAGING_RELEASE_ROOT/approval"
 current_sha_file="$STAGING_RELEASE_ROOT/current-sha"
 deployment_file="$STAGING_RELEASE_ROOT/current-deployment"
-previous_sha=$(<"$current_sha_file" 2>/dev/null || true)
+previous_sha=
+if [[ -f $current_sha_file ]]; then previous_sha=$(<"$current_sha_file"); fi
 rm -f "$approval_file"
 
 db_password=$(awk -F= '$1=="POSTGRES_PASSWORD" {sub(/^[^=]*=/, ""); print; exit}' "$STAGING_SUPABASE_DIR/.env")
 [[ -n $db_password && $db_password =~ ^[A-Za-z0-9]+$ ]] || die "staging database password is missing or unsafe"
-db_url="postgresql://postgres:${db_password}@127.0.0.1:15433/postgres"
+db_url="postgresql://postgres:${db_password}@127.0.0.1:15433/postgres?sslmode=disable"
 supabase_cli="$repo/node_modules/.bin/supabase"
 [[ -x $supabase_cli ]] || die "repository-pinned Supabase CLI is unavailable"
 

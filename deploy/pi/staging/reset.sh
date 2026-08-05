@@ -18,7 +18,7 @@ mkdir -p "$STAGING_SUPABASE_DIR/volumes/db/data" "$STAGING_SUPABASE_DIR/volumes/
 supabase_compose up -d
 for _ in $(seq 1 60); do docker exec teachnotes-staging-db pg_isready -U postgres >/dev/null 2>&1 && break; sleep 3; done
 db_password=$(awk -F= '$1=="POSTGRES_PASSWORD" {sub(/^[^=]*=/, ""); print; exit}' "$STAGING_SUPABASE_DIR/.env")
-db_url="postgresql://postgres:${db_password}@127.0.0.1:15433/postgres"
+db_url="postgresql://postgres:${db_password}@127.0.0.1:15433/postgres?sslmode=disable"
 SUPABASE_TELEMETRY_DISABLED=1 /home/dantheman/code/teachnotes/node_modules/.bin/supabase db push --db-url "$db_url" --workdir "$STAGING_RELEASE_DIR"
 app_compose up -d web cloudflared
 app_compose run --rm --no-deps web node scripts/seed-staging.mjs
