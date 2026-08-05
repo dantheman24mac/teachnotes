@@ -38,7 +38,8 @@ fi
 chmod 600 "$STAGING_SUPABASE_DIR/.env"
 
 set_env() {
-  local file=$1 key=$2 value=$3 tmp="${file}.tmp.$$"
+  local file=$1 key=$2 value=$3
+  local tmp="${file}.tmp.$$"
   awk -v key="$key" -v value="$value" 'BEGIN{done=0} $0 ~ "^" key "=" {print key "=" value; done=1; next} {print} END{if(!done) print key "=" value}' "$file" > "$tmp"
   chmod 600 "$tmp"; mv "$tmp" "$file"
 }
