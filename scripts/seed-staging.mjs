@@ -136,17 +136,22 @@ await restUpsert("lessons", [
   { id: "53000000-0000-4000-8000-000000000003", owner_id: admin.id, student_id: activeId, series_id: seriesId, occurrence_key: iso(7), starts_at: iso(7), duration_minutes: 60, rate_cents: 45000, status: "scheduled", billing_override: "default", notes: "Future staging lesson; not invoice eligible." },
 ]);
 
+const invoiceBucket = {
+  public: false,
+  file_size_limit: 10 * 1024 * 1024,
+  allowed_mime_types: ["application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+};
+
 await request("/storage/v1/bucket", {
   method: "POST",
   body: {
     id: "invoices",
     name: "invoices",
-    public: false,
-    file_size_limit: 10 * 1024 * 1024,
-    allowed_mime_types: ["application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ...invoiceBucket,
   },
   allowStatuses: [409],
   allowMessages: [/already exists/i],
 });
+await request("/storage/v1/bucket/invoices", { method: "PUT", body: invoiceBucket });
 
 process.stdout.write("Staging users and fictional fixtures are ready.\n");
