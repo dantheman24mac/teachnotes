@@ -11,8 +11,11 @@ production_healthy || die "production is unhealthy"
 mapfile -t containers < <(docker ps -a --filter 'name=teachnotes-staging' --format '{{.Names}}')
 [[ ${#containers[@]} -ge 12 ]] || die "expected staging containers are missing"
 for container in "${containers[@]}"; do
-  networks=$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' "$container")
-  [[ $networks != *"teachnotes "* && $networks != *"teachnotes-demo"* && $networks != *"supabase_default"* ]] || die "$container joined a production network"
+  while IFS= read -r network; do
+    case "$network" in
+      teachnotes|teachnotes-demo|supabase_default) die "$container joined production network $network" ;;
+    esac
+  done < <(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{println}}{{end}}' "$container")
   while IFS= read -r source; do
     [[ $source != /srv/teachnotes/supabase/volumes* ]] || die "$container mounts production Supabase data"
   done < <(docker inspect --format '{{range .Mounts}}{{.Source}}{{println}}{{end}}' "$container")
@@ -35,7 +38,7 @@ for route in auth/v1/health rest/v1/ storage/v1/status; do
 done
 status=$(curl -sS -o /dev/null -w '%{http_code}' https://staging-api.teachnotes.fyi/this-must-not-exist)
 [[ $status == 404 ]] || die "unmatched staging API route returned $status"
-signup_status=$(curl -sS -o /tmp/teachnotes-staging-signup.$$ -w '%{http_code}' -H "apikey: $(awk -F= '$1==\"NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY\" {print $2}' "$STAGING_SECRET_DIR/app.env")" -H 'content-type: application/json' --data '{"email":"blocked-signup@staging.teachnotes.test","password":"ThisMustNeverCreate123!"}' https://staging-api.teachnotes.fyi/auth/v1/signup)
+signup_status=$(curl -sS -o /tmp/teachnotes-staging-signup.$$ -w '%{http_code}' -H "apikey: $(awk -F= '$1=="NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" {sub(/^[^=]*=/, ""); print; exit}' "$STAGING_SECRET_DIR/app.env")" -H 'content-type: application/json' --data '{"email":"blocked-signup@staging.teachnotes.test","password":"ThisMustNeverCreate123!"}' https://staging-api.teachnotes.fyi/auth/v1/signup)
 rm -f /tmp/teachnotes-staging-signup.$$
 [[ $signup_status =~ ^4 ]] || die "public signup was not rejected"
 
