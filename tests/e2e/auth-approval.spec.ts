@@ -210,7 +210,7 @@ test.describe("authenticated account approval", () => {
   test.skip(enabled && missingConfiguration.length > 0, `Missing authenticated E2E configuration: ${missingConfiguration.join(", ")}`);
 
   test("signup, approval, isolation, revocation and password replacement", async ({ browser, page }, testInfo) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     test.skip(testInfo.project.name !== "desktop", "The stateful authenticated lifecycle runs once in the desktop project");
 
     const runId = `${Date.now()}-${crypto.randomUUID()}`;
@@ -323,6 +323,8 @@ test.describe("authenticated account approval", () => {
       const futureScheduledAt = new Date(now + 7 * 86_400_000).toISOString();
       const futureNoShowAt = new Date(now + 8 * 86_400_000).toISOString();
       const futureInvoicedAt = new Date(now + 9 * 86_400_000).toISOString();
+      const futureCanceledAt = new Date(now + 10 * 86_400_000).toISOString();
+      const futureDeletedAt = new Date(now + 11 * 86_400_000).toISOString();
       const { data: series, error: seriesError } = await directA.from("lesson_series").insert({
         owner_id: accountA.user_id,
         student_id: rowsA![0].id,
@@ -337,6 +339,8 @@ test.describe("authenticated account approval", () => {
         { id: crypto.randomUUID(), starts_at: futureScheduledAt, status: "scheduled", invoiced_at: null },
         { id: crypto.randomUUID(), starts_at: futureNoShowAt, status: "no_show", invoiced_at: null },
         { id: crypto.randomUUID(), starts_at: futureInvoicedAt, status: "scheduled", invoiced_at: new Date(now).toISOString() },
+        { id: crypto.randomUUID(), starts_at: futureCanceledAt, status: "canceled_rescheduled", invoiced_at: null },
+        { id: crypto.randomUUID(), starts_at: futureDeletedAt, status: "scheduled", invoiced_at: null, deleted_at: new Date(now).toISOString() },
       ];
       const { error: lessonFixtureError } = await directA.from("lessons").insert(lessonFixtures.map((lesson, index) => ({
         ...lesson,
@@ -349,6 +353,104 @@ test.describe("authenticated account approval", () => {
         notes: index === 0 ? "Preserved archive history" : "",
       })));
       expect(lessonFixtureError).toBeNull();
+
+      const crossTenantLessonId = crypto.randomUUID();
+      const { error: crossTenantLessonError } = await directB.from("lessons").insert({
+        id: crossTenantLessonId,
+        owner_id: accountB.user_id,
+        student_id: rowsA![0].id,
+        starts_at: new Date(now + 12 * 86_400_000).toISOString(),
+        duration_minutes: 60,
+        rate_cents: 45000,
+        status: "scheduled",
+      });
+      expect(crossTenantLessonError).toBeNull();
+
+      const archivedControlStudentId = crypto.randomUUID();
+      const archivedControlLessonId = crypto.randomUUID();
+      expect((await directA.from("students").insert({
+        id: archivedControlStudentId,
+        owner_id: accountA.user_id,
+        display_name: `Archived control ${runId}`,
+        default_duration_minutes: 60,
+        default_rate_cents: 45000,
+      })).error).toBeNull();
+      expect((await directA.from("lessons").insert({
+        id: archivedControlLessonId,
+        owner_id: accountA.user_id,
+        student_id: archivedControlStudentId,
+        starts_at: new Date(now + 13 * 86_400_000).toISOString(),
+        duration_minutes: 60,
+        rate_cents: 45000,
+        status: "scheduled",
+      })).error).toBeNull();
+      expect((await directA.rpc("archive_student", { p_student_id: archivedControlStudentId })).error).toBeNull();
+
+      const { data: crossTenantDefaults, error: crossTenantDefaultsError } = await directB
+        .from("students")
+        .update({ default_duration_minutes: 20, default_rate_cents: 100 })
+        .eq("id", rowsA![0].id)
+        .select("id");
+      expect(crossTenantDefaultsError).toBeNull();
+      expect(crossTenantDefaults).toEqual([]);
+
+      await page.goto(`/students/${rowsA![0].id}`);
+      await page.getByLabel("Default duration").fill("75");
+      await page.getByLabel("Lesson amount (R)").fill("515.25");
+      await page.getByLabel("Apply to future scheduled lessons").check();
+      await page.getByRole("button", { name: "Save defaults" }).click();
+      await expect(page.getByText("Defaults and future scheduled lessons saved.", { exact: true })).toBeVisible();
+      await page.reload();
+      await expect(page.getByLabel("Default duration")).toHaveValue("75");
+      await expect(page.getByLabel("Lesson amount (R)")).toHaveValue("515.25");
+
+      const { data: updatedDefaults, error: updatedDefaultsError } = await directA
+        .from("students")
+        .select("default_duration_minutes,default_rate_cents")
+        .eq("id", rowsA![0].id)
+        .single();
+      expect(updatedDefaultsError).toBeNull();
+      expect(updatedDefaults).toEqual({ default_duration_minutes: 75, default_rate_cents: 51525 });
+      const { data: defaultLessonRows, error: defaultLessonRowsError } = await directA
+        .from("lessons")
+        .select("id,duration_minutes,rate_cents")
+        .in("id", lessonFixtures.map((lesson) => lesson.id));
+      expect(defaultLessonRowsError).toBeNull();
+      const defaultLesson = (id: string) => defaultLessonRows?.find((lesson) => lesson.id === id);
+      expect(defaultLesson(lessonFixtures[0].id)).toMatchObject({ duration_minutes: 60, rate_cents: 45000 });
+      expect(defaultLesson(lessonFixtures[1].id)).toMatchObject({ duration_minutes: 75, rate_cents: 51525 });
+      expect(defaultLesson(lessonFixtures[2].id)).toMatchObject({ duration_minutes: 60, rate_cents: 45000 });
+      expect(defaultLesson(lessonFixtures[3].id)).toMatchObject({ duration_minutes: 60, rate_cents: 45000 });
+      expect(defaultLesson(lessonFixtures[4].id)).toMatchObject({ duration_minutes: 60, rate_cents: 45000 });
+      expect(defaultLesson(lessonFixtures[5].id)).toMatchObject({ duration_minutes: 60, rate_cents: 45000 });
+      const { data: archivedControlLesson } = await directA
+        .from("lessons")
+        .select("duration_minutes,rate_cents,deleted_at")
+        .eq("id", archivedControlLessonId)
+        .single();
+      expect(archivedControlLesson).toMatchObject({ duration_minutes: 60, rate_cents: 45000 });
+      expect(archivedControlLesson?.deleted_at).toBeTruthy();
+      const { data: crossTenantLesson } = await directB
+        .from("lessons")
+        .select("duration_minutes,rate_cents")
+        .eq("id", crossTenantLessonId)
+        .single();
+      expect(crossTenantLesson).toEqual({ duration_minutes: 60, rate_cents: 45000 });
+
+      const staleStudentId = crypto.randomUUID();
+      const { error: staleStudentError } = await directA.from("students").insert({
+        id: staleStudentId,
+        owner_id: accountA.user_id,
+        display_name: `Deleted-before-submit ${runId}`,
+        default_duration_minutes: 60,
+        default_rate_cents: 45000,
+      });
+      expect(staleStudentError).toBeNull();
+      await page.goto(`/students/${staleStudentId}`);
+      expect((await directA.rpc("archive_student", { p_student_id: staleStudentId })).error).toBeNull();
+      await page.getByLabel("Default duration").fill("90");
+      await page.getByRole("button", { name: "Save defaults" }).click();
+      await expect(page.getByText("We couldn’t save these lesson defaults. Nothing was changed.", { exact: true })).toBeVisible();
 
       const staleLessonPage = await page.context().newPage();
       const staleLessonResponse = await staleLessonPage.goto(`/lessons/${lessonFixtures[1].id}`);
@@ -490,9 +592,153 @@ test.describe("authenticated account approval", () => {
     } finally {
       await adminContext.close();
       await userBContext.close();
-      for (const email of [emailA, emailB]) {
+      for (const email of [emailB, emailA]) {
         const user = await findAuthUser(admin, email).catch(() => null);
-        if (user) await admin.auth.admin.deleteUser(user.id).catch(() => undefined);
+        if (user) {
+          const { error } = await admin.auth.admin.deleteUser(user.id);
+          expect(error).toBeNull();
+        }
+      }
+    }
+  });
+
+  test("workspace month invoice bounds persist in snapshots", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    test.skip(testInfo.project.name !== "desktop", "The authenticated invoice regression runs once in the desktop project");
+
+    const admin = serviceClient();
+    const adminAccount = await accountByEmail(admin, adminEmail);
+    expect(adminAccount).toMatchObject({ role: "admin", status: "approved" });
+    await signIn(page, adminEmail, adminPassword);
+    await expect(page).toHaveURL(/\/today$/);
+    const directAdmin = userClient(await accessToken(page.context()));
+    const studentId = crypto.randomUUID();
+    const studentName = `Month-boundary ${Date.now()}-${crypto.randomUUID()}`;
+    const snapshotTutorName = `Snapshot Tutor ${crypto.randomUUID()}`;
+    let originalTimezone: string | null = null;
+    let originalTutorName: string | null = null;
+    let hadSettings = false;
+
+    try {
+      const { data: settingsRow, error: settingsReadError } = await directAdmin
+        .from("business_settings")
+        .select("*")
+        .eq("owner_id", adminAccount!.user_id)
+        .maybeSingle();
+      expect(settingsReadError).toBeNull();
+      hadSettings = Boolean(settingsRow);
+      originalTimezone = settingsRow?.timezone ?? null;
+      originalTutorName = settingsRow?.tutor_name ?? null;
+      const { error: settingsError } = await directAdmin.from("business_settings").upsert({
+        owner_id: adminAccount!.user_id,
+        timezone: "Africa/Johannesburg",
+        tutor_name: snapshotTutorName,
+      }, { onConflict: "owner_id" });
+      expect(settingsError).toBeNull();
+
+      const { error: studentError } = await directAdmin.from("students").insert({
+        id: studentId,
+        owner_id: adminAccount!.user_id,
+        display_name: studentName,
+        default_duration_minutes: 60,
+        default_rate_cents: 22222,
+      });
+      expect(studentError).toBeNull();
+      const boundaryLessons = [
+        { id: crypto.randomUUID(), starts_at: "2026-07-31T21:59:59.999Z", rate_cents: 11111 },
+        { id: crypto.randomUUID(), starts_at: "2026-07-31T22:30:00.000Z", rate_cents: 22222 },
+        { id: crypto.randomUUID(), starts_at: "2026-08-31T22:00:00.000Z", rate_cents: 33333 },
+      ];
+      const { error: lessonsError } = await directAdmin.from("lessons").insert(boundaryLessons.map((lesson) => ({
+        ...lesson,
+        owner_id: adminAccount!.user_id,
+        student_id: studentId,
+        duration_minutes: 60,
+        status: "attended",
+        billing_override: "default",
+      })));
+      expect(lessonsError).toBeNull();
+
+      const julyUrl = `/invoices/new?month=2026-07&kind=student&student=${studentId}`;
+      const augustUrl = `/invoices/new?month=2026-08&kind=student&student=${studentId}`;
+      await page.goto(julyUrl);
+      await expect(page.getByText("1 eligible lessons", { exact: true })).toBeVisible();
+      await expect(page.locator(".grand-total")).toHaveText(new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(111.11));
+      await page.goto(augustUrl);
+      await expect(page.getByText("1 eligible lessons", { exact: true })).toBeVisible();
+      await expect(page.locator(".grand-total")).toHaveText(new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(222.22));
+
+      await page.getByRole("button", { name: "Save draft" }).click();
+      await expect(page).toHaveURL(/\/invoices\/[0-9a-f-]+$/);
+      const { data: draft, error: draftError } = await directAdmin
+        .from("invoices")
+        .select("id,period_start,period_end,tutor_snapshot")
+        .eq("owner_id", adminAccount!.user_id)
+        .eq("student_id", studentId)
+        .eq("status", "draft")
+        .single();
+      expect(draftError).toBeNull();
+      expect(new Date(draft!.period_start).toISOString()).toBe("2026-07-31T22:00:00.000Z");
+      expect(new Date(draft!.period_end).toISOString()).toBe("2026-08-31T21:59:59.999Z");
+      expect(draft!.tutor_snapshot).toMatchObject({ timezone: "Africa/Johannesburg" });
+
+      await page.goto(augustUrl);
+      await page.getByRole("button", { name: "Finalize & create PDF" }).click();
+      await expect(page).toHaveURL(/\/invoices\/[0-9a-f-]+$/);
+      const finalizedId = page.url().split("/").at(-1)!;
+      const { data: finalized, error: finalizedError } = await directAdmin
+        .from("invoices")
+        .select("period_start,period_end,tutor_snapshot,pdf_path")
+        .eq("id", finalizedId)
+        .single();
+      expect(finalizedError).toBeNull();
+      expect(new Date(finalized!.period_start).toISOString()).toBe("2026-07-31T22:00:00.000Z");
+      expect(new Date(finalized!.period_end).toISOString()).toBe("2026-08-31T21:59:59.999Z");
+      expect(finalized!.tutor_snapshot).toMatchObject({
+        timezone: "Africa/Johannesburg",
+        tutorName: snapshotTutorName,
+      });
+      await expect(page.getByText("August 2026", { exact: true })).toBeVisible();
+
+      expect((await directAdmin.from("business_settings").update({
+        timezone: "America/New_York",
+        tutor_name: `Changed live tutor ${crypto.randomUUID()}`,
+      }).eq("owner_id", adminAccount!.user_id)).error).toBeNull();
+      await page.reload();
+      await expect(page.getByText("August 2026", { exact: true })).toBeVisible();
+      const storedPdfPath = finalized!.pdf_path;
+      expect(storedPdfPath).toBeTruthy();
+      if (!storedPdfPath) throw new Error("Finalized invoice did not store its generated PDF");
+      const { error: removeStoredPdfError } = await admin.storage
+        .from("invoices")
+        .remove([storedPdfPath]);
+      expect(removeStoredPdfError).toBeNull();
+      const { data: removedPdf, error: removedPdfError } = await admin.storage
+        .from("invoices")
+        .download(storedPdfPath);
+      expect(removedPdf).toBeNull();
+      expect(removedPdfError).toBeTruthy();
+      const pdfResponse = await page.context().request.get(`/api/invoices/${finalizedId}/pdf`);
+      expect(pdfResponse.status()).toBe(200);
+      expect(pdfResponse.headers()["content-type"]).toContain("application/pdf");
+      expect((await pdfResponse.body()).byteLength).toBeGreaterThan(1_000);
+    } finally {
+      const { data: invoices } = await directAdmin.from("invoices").select("id,pdf_path").eq("student_id", studentId);
+      const pdfPaths = (invoices ?? []).map((invoice) => invoice.pdf_path).filter(Boolean) as string[];
+      if (pdfPaths.length) {
+        const { error } = await admin.storage.from("invoices").remove(pdfPaths);
+        expect(error).toBeNull();
+      }
+      if (invoices?.length) await directAdmin.from("invoices").delete().in("id", invoices.map((invoice) => invoice.id));
+      await directAdmin.from("lessons").delete().eq("student_id", studentId);
+      await directAdmin.from("students").delete().eq("id", studentId);
+      if (hadSettings) {
+        await directAdmin.from("business_settings").update({
+          timezone: originalTimezone ?? "Africa/Johannesburg",
+          tutor_name: originalTutorName ?? "",
+        }).eq("owner_id", adminAccount!.user_id);
+      } else if (adminAccount) {
+        await directAdmin.from("business_settings").delete().eq("owner_id", adminAccount.user_id);
       }
     }
   });
