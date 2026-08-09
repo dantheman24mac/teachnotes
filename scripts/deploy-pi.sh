@@ -50,6 +50,7 @@ cd "$repo_root"
 branch=$(git branch --show-current)
 [[ -n $branch ]] || die "detached HEAD cannot be deployed"
 [[ $branch =~ ^[A-Za-z0-9._/-]+$ ]] || die "the branch name contains unsupported characters"
+[[ $branch == main ]] || die "production deployment is restricted to main"
 
 if [[ -n $(git status --porcelain) ]]; then
   die "the working tree is not clean; deploy only after every intended change is committed"
@@ -75,6 +76,8 @@ repo_slug=${repo_slug%.git}
 printf 'Verifying that %s is pushed to origin/%s...\n' "$sha" "$branch"
 remote_sha=$(git ls-remote --exit-code origin "refs/heads/$branch" | awk '{print $1}')
 [[ $sha == "$remote_sha" ]] || die "local HEAD is not the pushed tip of origin/$branch"
+origin_main_sha=$(git ls-remote --exit-code origin refs/heads/main | awk '{print $1}')
+[[ $sha == "$origin_main_sha" ]] || die "local SHA is not the exact origin/main tip"
 
 command -v gh >/dev/null 2>&1 || die "GitHub CLI is required to verify the CI gate"
 run_id=$(gh run list \
@@ -88,6 +91,26 @@ run_id=$(gh run list \
 
 printf 'Waiting for GitHub Actions run %s...\n' "$run_id"
 gh run watch "$run_id" --repo "$repo_slug" --exit-status
+
+printf 'Verifying exact-SHA staging health and approval...\n'
+ssh -o BatchMode=yes -o ConnectTimeout=10 dantheman bash -s -- "$sha" <<'STAGING_GATE'
+set -Eeuo pipefail
+sha=$1
+root=/home/dantheman/releases/teachnotes-staging
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+[[ -f $root/current-sha && $(<"$root/current-sha") == "$sha" ]] || die "staging current SHA does not match production candidate"
+[[ -f $root/current-deployment && -f $root/approval ]] || die "staging deployment or approval record is missing"
+unset SHA DEPLOYED_AT APPROVED_AT HEALTH_SHA
+source "$root/current-deployment"
+deployment_sha=$SHA; deployment_at=$DEPLOYED_AT
+unset SHA DEPLOYED_AT APPROVED_AT HEALTH_SHA
+source "$root/approval"
+[[ $SHA == "$sha" && $HEALTH_SHA == "$sha" ]] || die "approval SHA does not match production candidate"
+[[ $DEPLOYED_AT == "$deployment_at" && $APPROVED_AT > "$DEPLOYED_AT" ]] || die "staging approval is stale"
+body=$(curl -fsS --retry 3 https://staging.teachnotes.fyi/api/health) || die "staging public health failed"
+grep -Eq '"environment"[[:space:]]*:[[:space:]]*"staging"' <<<"$body" || die "staging public environment mismatch"
+grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$body" || die "staging public SHA mismatch"
+STAGING_GATE
 
 if [[ $confirm != true ]]; then
   printf '\nDeploy %s from %s to the Raspberry Pi? [y/N] ' "$sha" "$branch"

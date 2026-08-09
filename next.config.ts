@@ -14,10 +14,13 @@ const nextConfig: NextConfig = {
     },
   },
   async headers() {
+    const stagingHeaders = process.env.TEACHNOTES_ENVIRONMENT === "staging"
+      ? [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" }]
+      : [];
     return [
       {
         source: "/:path*",
-        headers: [...staticSecurityHeaders],
+        headers: [...staticSecurityHeaders, ...stagingHeaders],
       },
     ];
   },
