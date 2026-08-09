@@ -8,9 +8,42 @@ source "$STAGING_RELEASE_DIR/deploy/pi/staging/common.sh"
 require_commands docker curl
 production_healthy || die "production is unhealthy"
 
-mapfile -t containers < <(docker ps -a --filter 'name=teachnotes-staging' --format '{{.Names}}')
-[[ ${#containers[@]} -ge 12 ]] || die "expected staging containers are missing"
-for container in "${containers[@]}"; do
+declare -a actual_containers=()
+for project in "$STAGING_APP_PROJECT" "$STAGING_SUPABASE_PROJECT"; do
+  while IFS= read -r container; do
+    [[ -n $container ]] && actual_containers+=("$container")
+  done < <(docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --format '{{.Names}}')
+done
+[[ ${#actual_containers[@]} -eq 13 ]] || die "expected exactly 13 staging project containers, found ${#actual_containers[@]}"
+
+require_compose_service() {
+  local project=$1 service=$2 id name state health
+  local -a ids=()
+  mapfile -t ids < <(docker ps -aq \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=$service")
+  [[ ${#ids[@]} -eq 1 ]] || die "expected exactly one $project/$service container, found ${#ids[@]}"
+  id=${ids[0]}
+  name=$(docker inspect --format '{{.Name}}' "$id"); name=${name#/}
+  state=$(docker inspect --format '{{.State.Status}}' "$id")
+  health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id")
+  [[ $state == running ]] || die "$name is not running ($state)"
+  if [[ $service == cloudflared ]]; then
+    [[ $health == none || $health == healthy ]] || die "$name is not healthy ($health)"
+  else
+    [[ $health == healthy ]] || die "$name does not have a passing healthcheck ($health)"
+  fi
+}
+
+for service in web cloudflared; do
+  require_compose_service "$STAGING_APP_PROJECT" "$service"
+done
+for service in studio kong auth rest realtime storage imgproxy meta functions db supavisor; do
+  require_compose_service "$STAGING_SUPABASE_PROJECT" "$service"
+done
+for container in "${actual_containers[@]}"; do
   while IFS= read -r network; do
     case "$network" in
       teachnotes|teachnotes-demo|supabase_default) die "$container joined production network $network" ;;
@@ -18,6 +51,7 @@ for container in "${containers[@]}"; do
   done < <(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{println}}{{end}}' "$container")
   while IFS= read -r source; do
     [[ $source != /srv/teachnotes/supabase/volumes* ]] || die "$container mounts production Supabase data"
+    [[ $source != /var/lib/docker/volumes/supabase_* ]] || die "$container mounts a production Supabase named volume"
   done < <(docker inspect --format '{{range .Mounts}}{{.Source}}{{println}}{{end}}' "$container")
 done
 

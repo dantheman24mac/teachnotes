@@ -22,6 +22,8 @@ release_root=/home/dantheman/releases/teachnotes-staging
 release_dir="$release_root/$sha"
 mkdir -p "$release_root"
 if [[ ! -e $release_dir ]]; then git -C "$repo" worktree add --quiet --detach "$release_dir" "$sha"; fi
+git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $release_dir" || { printf 'error: release path is not a registered worktree\n' >&2; exit 1; }
 [[ $(git -C "$release_dir" rev-parse HEAD) == "$sha" ]] || { printf 'error: release worktree mismatch\n' >&2; exit 1; }
+[[ -z $(git -C "$release_dir" status --porcelain --untracked-files=all) ]] || { printf 'error: release worktree is not clean\n' >&2; exit 1; }
 bash "$release_dir/deploy/pi/staging/deploy-release.sh" "$sha" "$branch"
 REMOTE
