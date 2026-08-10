@@ -40,7 +40,7 @@
     "sharp": "0.35.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
@@ -50,9 +50,9 @@
     "@vitest/coverage-v8": "^4.1.10",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.12",
+    "eslint-config-next": "16.3.0",
     "jsdom": "^30.0.1",
-    "supabase": "^2.110.0",
+    "supabase": "^2.111.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"
