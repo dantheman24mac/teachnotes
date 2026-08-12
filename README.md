@@ -23,7 +23,7 @@ The demo runs in its own container without a Supabase URL, service key or route 
 - IndexedDB lesson cache, offline outbox, idempotent sync and visible conflict resolution.
 - Student-specific fixed duration/price defaults and future-lesson updates.
 - Weekly and fortnightly recurring series, multiple weekdays, exclusions, open-ended rolling materialization and one/following/all-future rescheduling.
-- Consolidated and per-student monthly invoice previews, immutable invoice snapshots, private PDFs, void-and-regenerate behavior and double-billing protection.
+- Consolidated and per-student monthly invoice previews, immutable invoice snapshots, private Excel workbooks with PDFs converted from those workbooks, void-and-regenerate behavior and double-billing protection.
 - Row Level Security on every user-owned database table and private invoice storage.
 - Responsive desktop/mobile UI, installable web manifest, neutral offline shell, unit tests and browser workflow tests.
 
@@ -80,7 +80,7 @@ flowchart LR
   web --> kong["Supabase Kong gateway"]
   kong --> auth["Supabase Auth"]
   kong --> rest["PostgREST + Row Level Security"]
-  kong --> storage["Private invoice storage"]
+  kong --> storage["Private invoice Excel/PDF storage"]
   rest --> postgres[(PostgreSQL)]
   browser --> cache["Namespaced IndexedDB cache + outbox"]
 ```
@@ -97,7 +97,7 @@ flowchart LR
 - Production secrets remain in mode-`600` files on the Pi and are never Docker build arguments or `NEXT_PUBLIC_*` values.
 - The database, connection pooler and API gateway bind only to loopback; Cloudflare Tunnel is the only Internet ingress.
 - Application approval checks and PostgreSQL Row Level Security both enforce workspace isolation.
-- Invoice objects are private and scoped to the authenticated owner.
+- Invoice Excel and PDF objects are private and scoped to the authenticated owner. Existing legacy PDFs remain unchanged; new files are generated from finalized snapshots.
 - A nonce-based Content Security Policy, HSTS, clickjacking protection, MIME sniffing protection and a restrictive Permissions Policy are applied at the web layer.
 - CI runs linting, type checks, unit tests and a production build. CodeQL, Dependabot, GitGuardian and GitHub secret scanning cover the public repository.
 
@@ -105,7 +105,7 @@ See [Security architecture](docs/security-architecture.md) for the trust boundar
 
 ## Raspberry Pi production
 
-The root `Dockerfile` produces a non-root ARM64-compatible Next.js standalone server with `/api/health`. The Pi deployment runs the official self-hosted Supabase Docker stack and joins its Kong gateway to a private `teachnotes` Docker network. Cloudflare Tunnel publishes only the Next.js app and Supabase API hostnames; no inbound router or database ports are opened.
+The root `Dockerfile` produces a non-root ARM64-compatible Next.js standalone server with `/api/health` and headless LibreOffice Calc for invoice conversion. It pins Alpine 3.23 and includes Writer's small shared registry dependency because Alpine's split Calc package cannot initialize headlessly without it. The Pi deployment runs the official self-hosted Supabase Docker stack and joins its Kong gateway to a private `teachnotes` Docker network. Cloudflare Tunnel publishes only the Next.js app and Supabase API hostnames; no inbound router or database ports are opened.
 
 See [deploy/pi/README.md](deploy/pi/README.md) for the topology, environment templates, startup sequence and local backup procedure. Railway remains a compatible later option because the web container is stateless and continues to use standard Supabase URLs.
 

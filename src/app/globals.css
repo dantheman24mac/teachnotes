@@ -223,8 +223,8 @@ h3 { margin-bottom: .3rem; }
 .invoice-line strong { text-align: right; color: var(--ink); }
 .grand-total { display: block; margin: 8px 0 22px; font-family: var(--font-fraunces); font-size: 2.4rem; font-weight: 550; }
 .summary-line { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); font-size: .8rem; }
-.invoice-summary form { margin-top: 22px; }
-.invoice-actions { display: grid; gap: 8px; }
+.invoice-actions { display: grid; gap: 8px; margin-top: 22px; }
+.invoice-actions form { display: contents; }
 .invoice-document { max-width: 900px; margin: 0 auto; padding: clamp(28px, 6vw, 65px); }
 .document-head { display: flex; justify-content: space-between; gap: 20px; padding-bottom: 30px; border-bottom: 2px solid var(--ink); }
 .document-seal { height: fit-content; display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 99px; color: var(--forest); background: var(--forest-soft); font-size: .75rem; font-weight: 800; text-transform: capitalize; }
@@ -237,6 +237,9 @@ h3 { margin-bottom: .3rem; }
 .document-total { width: min(330px, 100%); margin: 28px 0 0 auto; display: flex; justify-content: space-between; padding-top: 16px; border-top: 3px solid var(--orange); font-size: 1.25rem; }
 .void-notice { margin-top: 25px; display: flex; gap: 12px; padding: 13px; border-radius: 9px; color: var(--red); background: #fae4e2; }
 .document-actions { max-width: 900px; margin: 16px auto; display: flex; align-items: flex-start; gap: 10px; }
+.artifact-notice { max-width: 900px; margin: 0 auto 16px; display: grid; gap: 3px; padding: 13px 16px; border: 1px solid #a7c7bc; border-radius: 10px; color: var(--forest); background: var(--forest-soft); font-size: .78rem; }
+.artifact-notice.error { color: #8b3e35; border-color: #e2afa8; background: #fae4e2; }
+.artifact-notice span { color: inherit; opacity: .82; }
 .void-details { position: relative; }
 .void-details summary { display: flex; align-items: center; gap: 6px; padding: 11px; cursor: pointer; color: var(--red); font-size: .8rem; font-weight: 700; }
 .void-details form { position: absolute; z-index: 5; top: 48px; left: 0; width: 290px; display: grid; gap: 10px; padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: white; box-shadow: var(--shadow); }

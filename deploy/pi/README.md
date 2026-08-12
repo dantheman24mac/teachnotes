@@ -175,7 +175,7 @@ container still has no access to the `teachnotes` production Docker network.
 
 ## Local-only backups
 
-`backup.sh` creates a timestamped PostgreSQL custom-format dump, archives invoice Storage and writes checksums. Backups are not deleted automatically:
+`backup.sh` creates a timestamped PostgreSQL custom-format dump, archives invoice Storage (including both Excel and PDF invoice artifacts) and writes checksums. Backups are not deleted automatically:
 
 ```bash
 sudo install -d -m 700 -o dantheman -g dantheman /srv/teachnotes/backups

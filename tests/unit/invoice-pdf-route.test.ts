@@ -30,8 +30,16 @@ const invoice: Invoice = {
   periodStart: "2026-07-31T22:00:00.000Z",
   periodEnd: "2026-08-31T21:59:59.999Z",
   recipientName: "Snapshot recipient",
+  recipientSnapshot: {
+    name: "Snapshot recipient",
+    email: "recipient@example.test",
+    address: "Recipient address",
+  },
   totalCents: 22222,
   tutorSnapshot: snapshotSettings,
+  documentFormat: "legacy_pdf",
+  pdfPath: "missing.pdf",
+  xlsxPath: null,
   lines: [],
 };
 

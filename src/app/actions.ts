@@ -5,10 +5,11 @@ import { fromZonedTime } from "date-fns-tz";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireApprovedUser } from "@/lib/auth";
 import { expandSeries } from "@/lib/recurrence";
 import { getBusinessSettings, getInvoice, getInvoicePreview, getStudent } from "@/lib/data";
-import { renderInvoicePdf } from "@/lib/invoice-pdf";
+import { generateInvoiceArtifacts, INVOICE_ARTIFACT_MIME } from "@/lib/invoice-artifacts";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { Invoice } from "@/lib/types";
 
@@ -225,6 +226,44 @@ export async function saveSettings(formData: FormData) {
   revalidatePath("/settings");
 }
 
+async function storeInvoiceArtifacts(userId: string, invoice: Invoice) {
+  if (invoice.documentFormat !== "spreadsheet_v1" || invoice.status !== "finalized") {
+    throw new Error("Only finalized spreadsheet invoices can generate artifacts");
+  }
+  const artifacts = await generateInvoiceArtifacts(invoice);
+  const folder = `${userId}/${invoice.id}`;
+  const xlsxPath = `${folder}/${artifacts.baseName}.xlsx`;
+  const pdfPath = `${folder}/${artifacts.baseName}.pdf`;
+  const supabase = await createClient();
+  await storeImmutableInvoiceArtifact(supabase, xlsxPath, artifacts.xlsx, INVOICE_ARTIFACT_MIME.xlsx);
+  await storeImmutableInvoiceArtifact(supabase, pdfPath, artifacts.pdf, INVOICE_ARTIFACT_MIME.pdf);
+  const { error: updateError } = await supabase
+    .from("invoices")
+    .update({ xlsx_path: xlsxPath, pdf_path: pdfPath })
+    .eq("id", invoice.id)
+    .eq("owner_id", userId)
+    .eq("document_format", "spreadsheet_v1")
+    .select("id")
+    .single();
+  if (updateError) throw updateError;
+}
+
+async function storeImmutableInvoiceArtifact(
+  supabase: SupabaseClient,
+  path: string,
+  contents: Buffer,
+  contentType: string,
+) {
+  const bucket = supabase.storage.from("invoices");
+  const { error: uploadError } = await bucket.upload(path, contents, { contentType, upsert: false });
+  if (!uploadError) return;
+
+  const { data: existing, error: downloadError } = await bucket.download(path);
+  if (downloadError || !existing) throw uploadError;
+  const existingContents = Buffer.from(await existing.arrayBuffer());
+  if (!existingContents.equals(contents)) throw uploadError;
+}
+
 export async function finalizeInvoice(formData: FormData) {
   if (!isSupabaseConfigured()) { redirect("/invoices"); }
   const user = await requireUser();
@@ -241,20 +280,25 @@ export async function finalizeInvoice(formData: FormData) {
   const { data: number, error: numberError } = await supabase.rpc("next_invoice_number", { p_prefix: settings.invoicePrefix });
   if (numberError) throw numberError;
   const dueAt = addDays(new Date(), settings.paymentTermsDays);
-  const { data: invoiceRow, error } = await supabase.from("invoices").insert({ owner_id: user.id, number, kind, status: "finalized", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents, issued_at: new Date().toISOString(), due_at: dueAt.toISOString() }).select("id").single();
+  const { data: invoiceRow, error } = await supabase.from("invoices").insert({ owner_id: user.id, number, kind, status: "finalized", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents, issued_at: new Date().toISOString(), due_at: dueAt.toISOString() }).select("id").single();
   if (error) throw error;
   const lines = lessons.map((lesson) => ({ invoice_id: invoiceRow.id, lesson_id: lesson.id, student_name: lesson.studentName, lesson_date: lesson.startsAt, duration_minutes: lesson.durationMinutes, lesson_status: lesson.status, amount_cents: lesson.rateCents }));
   const { error: lineError } = await supabase.from("invoice_lines").insert(lines);
   if (lineError) { await supabase.from("invoices").delete().eq("id", invoiceRow.id); throw lineError; }
-  await supabase.from("lessons").update({ invoiced_at: new Date().toISOString() }).in("id", lessons.map((lesson) => lesson.id));
+  const { error: lessonUpdateError } = await supabase.from("lessons").update({ invoiced_at: new Date().toISOString() }).in("id", lessons.map((lesson) => lesson.id));
+  if (lessonUpdateError) { await supabase.from("invoices").delete().eq("id", invoiceRow.id); throw lessonUpdateError; }
   const invoice = await getInvoice(invoiceRow.id) as Invoice;
-  if (invoice) {
-    const buffer = await renderInvoicePdf(invoice, settings);
-    const path = `${user.id}/${invoiceRow.id}.pdf`;
-    const { error: uploadError } = await supabase.storage.from("invoices").upload(path, buffer, { contentType: "application/pdf", upsert: true });
-    if (!uploadError) await supabase.from("invoices").update({ pdf_path: path }).eq("id", invoiceRow.id);
+  let artifactFailed = false;
+  try {
+    if (!invoice) throw new Error("Finalized invoice could not be reloaded");
+    await storeInvoiceArtifacts(user.id, invoice);
+  } catch (artifactError) {
+    artifactFailed = true;
+    console.error("Invoice artifact generation failed", { invoiceId: invoiceRow.id, artifactError });
   }
-  redirect(`/invoices/${invoiceRow.id}`);
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${invoiceRow.id}`);
+  redirect(`/invoices/${invoiceRow.id}${artifactFailed ? "?artifact=failed" : ""}`);
 }
 
 export async function saveDraftInvoice(formData: FormData) {
@@ -273,9 +317,28 @@ export async function saveDraftInvoice(formData: FormData) {
     ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress }
     : { name: student?.guardianName || student?.displayName || "Client", email: student?.billingEmail || "", address: student?.billingAddress || "" };
   const supabase = await createClient();
-  const { data, error } = await supabase.from("invoices").insert({ owner_id: user.id, kind, status: "draft", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents }).select("id").single();
+  const { data, error } = await supabase.from("invoices").insert({ owner_id: user.id, kind, status: "draft", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents }).select("id").single();
   if (error) throw error;
   redirect(`/invoices/${data.id}`);
+}
+
+export async function retryInvoiceArtifacts(formData: FormData) {
+  if (!isSupabaseConfigured()) redirect("/invoices");
+  const user = await requireUser();
+  const invoiceId = z.string().uuid().parse(formData.get("invoiceId"));
+  const invoice = await getInvoice(invoiceId);
+  if (!invoice || invoice.status !== "finalized" || invoice.documentFormat !== "spreadsheet_v1") {
+    throw new Error("Invoice artifacts cannot be generated for this invoice");
+  }
+  let failed = false;
+  try {
+    await storeInvoiceArtifacts(user.id, invoice);
+  } catch (artifactError) {
+    failed = true;
+    console.error("Invoice artifact retry failed", { invoiceId, artifactError });
+  }
+  revalidatePath(`/invoices/${invoiceId}`);
+  redirect(`/invoices/${invoiceId}?artifact=${failed ? "failed" : "ready"}`);
 }
 
 export async function voidInvoice(formData: FormData) {

@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactCompiler: true,
   output: "standalone",
+  serverExternalPackages: ["exceljs"],
   turbopack: {
     root: process.cwd(),
   },
