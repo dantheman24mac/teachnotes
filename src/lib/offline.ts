@@ -121,12 +121,7 @@ export async function getCachedLessons(userId: string) {
   return (await database(userId)).getAll("lessons");
 }
 
-export function queueLessonPatch(userId: string, lesson: Lesson, patch: SyncOperation["patch"]): Promise<Lesson>;
-export function queueLessonPatch(lesson: Lesson, patch: SyncOperation["patch"]): Promise<Lesson>;
-export async function queueLessonPatch(userIdOrLesson: string | Lesson, lessonOrPatch: Lesson | SyncOperation["patch"], maybePatch?: SyncOperation["patch"]) {
-  const userId = typeof userIdOrLesson === "string" ? userIdOrLesson : (localStorage.getItem(ACTIVE_USER_KEY) ?? "demo");
-  const lesson = typeof userIdOrLesson === "string" ? lessonOrPatch as Lesson : userIdOrLesson;
-  const patch = typeof userIdOrLesson === "string" ? maybePatch as SyncOperation["patch"] : lessonOrPatch as SyncOperation["patch"];
+export async function queueLessonPatch(userId: string, lesson: Lesson, patch: SyncOperation["patch"]) {
   const db = await database(userId);
   const updated = { ...lesson, ...patch } as Lesson;
   const operation: SyncOperation = { id: crypto.randomUUID(), lessonId: lesson.id, baseVersion: lesson.version, patch, clientTimestamp: new Date().toISOString() };
