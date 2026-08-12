@@ -10,7 +10,7 @@ The rest of this document is meant to help you navigate the codebase and make ch
 
 # Glossary
 
-You and the developer need to be on the same page regarding terminology
+You and the developer need to be on the same page regarding terminology.
 
 - you are the agent reading this document and editing TeachNotes
 - user or teacher means the person using TeachNotes to track students attendance and lesson notes
