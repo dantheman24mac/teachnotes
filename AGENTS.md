@@ -1,5 +1,5 @@
 # Welcome to TeachNotes
-This application was created to reduce the time it takes a teacher to track students attendance and associated lesson notes
+This application was created to reduce the time it takes a teacher to track students' attendance and associated lesson notes.
 
 # A note from Daniel
 I like ambitious, simple systems, and software that feels obvious to use. I don't want you to preserve complexity, just because it already exists. Do not introduce new systems, just because its the most impressive. Understand what the real problem that to be solved. Try the simplest model that solve the problem
