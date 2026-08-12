@@ -6,7 +6,7 @@ I like ambitious, simple systems, and software that feels obvious to use. I don'
 
 Channel "Measure twice, cut once" and "yagni". Fight against scope creep. Try to do what the dev intended in a minimal and realistic way.
 
-The rest of this document is meant to help you navigate the codebase and make changes effectively. These instructions are not hard rules, but good defaults. The developers preferences should be able to override anything here.
+The rest of this document is meant to help you navigate the codebase and make changes effectively. These instructions are not hard rules, but good defaults. The developer's preferences should be able to override anything here.
 
 # Glossary
 
