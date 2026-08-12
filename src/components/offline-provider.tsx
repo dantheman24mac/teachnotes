@@ -118,7 +118,7 @@ export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = 
       {children}
       <button className={`connectivity ${online ? "is-online" : "is-offline"}`} onClick={() => void syncNow()} type="button" aria-label="Connection and synchronization status">
         {online ? <Wifi size={15} /> : <CloudOff size={15} />}
-        <span>{online ? (pending ? `${pending} waiting` : "Synced") : `${pending} offline edit${pending === 1 ? "" : "s"}`}</span>
+        <span>{!ready ? "Preparing…" : online ? (pending ? `${pending} waiting` : "Synced") : `${pending} offline edit${pending === 1 ? "" : "s"}`}</span>
         {syncing && <RefreshCw size={14} className="spin" />}
       </button>
       {conflicts.length > 0 && (

@@ -86,6 +86,7 @@ export interface Invoice {
   issuedAt?: string | null;
   dueAt?: string | null;
   voidReason?: string | null;
+  tutorSnapshot?: BusinessSettings;
   lines: InvoiceLine[];
 }
 

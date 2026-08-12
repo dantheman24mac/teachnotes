@@ -127,10 +127,11 @@ h3 { margin-bottom: .3rem; }
 .stack-form fieldset, .lesson-editor fieldset { padding: 0; border: 0; }
 .stack-form legend, .lesson-editor legend { margin-bottom: 8px; font-size: .78rem; font-weight: 700; }
 .weekday-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
-.weekday-grid label { cursor: pointer; }
-.weekday-grid input { position: absolute; opacity: 0; }
+.weekday-grid label { position: relative; overflow: hidden; cursor: pointer; }
+.weekday-grid input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
 .weekday-grid label { height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: white; }
 .weekday-grid label:has(input:checked) { color: white; border-color: var(--forest); background: var(--forest); }
+.weekday-grid label:has(input:focus-visible) { outline: 3px solid var(--forest); outline-offset: 2px; }
 .check-row { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 8px !important; font-weight: 500 !important; }
 .check-row input { width: 16px; height: 16px; }
 
@@ -413,4 +414,18 @@ h3 { margin-bottom: .3rem; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: .01ms !important; }
+}
+
+.staging-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  padding: 7px 12px;
+  color: #1f1600;
+  background: repeating-linear-gradient(135deg, #ffd43b, #ffd43b 16px, #ffe680 16px, #ffe680 32px);
+  border-bottom: 2px solid #8a6500;
+  text-align: center;
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .12em;
 }

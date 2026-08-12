@@ -156,6 +156,7 @@ export const demoInvoices: Invoice[] = [
     totalCents: 362000,
     issuedAt: subDays(today, 8).toISOString(),
     dueAt: subDays(today, 1).toISOString(),
+    tutorSnapshot: demoSettings,
     lines: [],
   },
 ];

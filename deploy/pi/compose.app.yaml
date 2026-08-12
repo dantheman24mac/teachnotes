@@ -9,6 +9,7 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        TEACHNOTES_ENVIRONMENT: production
         TEACHNOTES_RELEASE_SHA: ${TEACHNOTES_RELEASE_SHA:-}
     env_file:
       - app.env
@@ -17,6 +18,7 @@ services:
       PORT: 3000
       SUPABASE_INTERNAL_URL: http://kong:8000
       TEACHNOTES_RELEASE_SHA: ${TEACHNOTES_RELEASE_SHA:-}
+      TEACHNOTES_ENVIRONMENT: production
     expose:
       - "3000"
     healthcheck:
@@ -43,9 +45,11 @@ services:
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ""
         NEXT_PUBLIC_APP_URL: https://demo.teachnotes.fyi
         DEMO_MODE: "true"
+        TEACHNOTES_ENVIRONMENT: demo
         TEACHNOTES_RELEASE_SHA: ${TEACHNOTES_RELEASE_SHA:-}
     environment:
       DEMO_MODE: "true"
+      TEACHNOTES_ENVIRONMENT: demo
       HOSTNAME: 0.0.0.0
       PORT: 3000
       TEACHNOTES_RELEASE_SHA: ${TEACHNOTES_RELEASE_SHA:-}

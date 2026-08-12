@@ -4,6 +4,7 @@ import { calculateInvoiceTotal, isBillable } from "./domain";
 import { expandSeries } from "./recurrence";
 import { requireApprovedUser } from "./auth";
 import { createClient, isSupabaseConfigured } from "./supabase/server";
+import { getWorkspaceInvoicePeriod } from "./timezone";
 import type { BusinessSettings, Invoice, Lesson, Student } from "./types";
 
 function mapStudent(row: Record<string, unknown>): Student {
@@ -201,6 +202,10 @@ export async function getInvoices(): Promise<Invoice[]> {
     issuedAt: row.issued_at,
     dueAt: row.due_at,
     voidReason: row.void_reason,
+    tutorSnapshot: {
+      ...demoSettings,
+      ...(row.tutor_snapshot as Partial<BusinessSettings> | null),
+    },
     lines: (row.invoice_lines ?? []).map((line: Record<string, unknown>) => ({
       id: String(line.id),
       lessonId: String(line.lesson_id),
@@ -217,12 +222,16 @@ export async function getInvoice(id: string) {
   return (await getInvoices()).find((invoice) => invoice.id === id) ?? null;
 }
 
-export async function getInvoicePreview(month: string, studentId?: string) {
-  const start = new Date(`${month}-01T00:00:00+02:00`);
-  const end = endOfMonth(start);
-  const lessons = await getLessons({ from: start.toISOString(), to: end.toISOString(), studentId });
+export async function getInvoicePreview(
+  month: string,
+  studentId?: string,
+  settingsOverride?: BusinessSettings,
+) {
+  const settings = settingsOverride ?? await getBusinessSettings();
+  const period = getWorkspaceInvoicePeriod(month, settings.timezone);
+  const lessons = await getLessons({ from: period.start.toISOString(), to: period.end.toISOString(), studentId });
   const eligible = lessons.filter(
     (lesson) => !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride),
   );
-  return { lessons: eligible, totalCents: calculateInvoiceTotal(eligible) };
+  return { lessons: eligible, totalCents: calculateInvoiceTotal(eligible), period, settings };
 }

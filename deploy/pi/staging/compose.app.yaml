@@ -1,0 +1,54 @@
+name: teachnotes-staging
+
+services:
+  web:
+    container_name: teachnotes-staging-web
+    image: teachnotes-staging-web:latest
+    build:
+      context: ../../..
+      target: runner
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: https://staging-api.teachnotes.fyi
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_APP_URL: https://staging.teachnotes.fyi
+        TEACHNOTES_ENVIRONMENT: staging
+        TEACHNOTES_RELEASE_SHA: ${TEACHNOTES_RELEASE_SHA}
+    env_file:
+      - ${STAGING_SECRET_DIR}/app.env
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      TEACHNOTES_ENVIRONMENT: staging
+      TEACHNOTES_RELEASE_SHA: ${TEACHNOTES_RELEASE_SHA}
+      NEXT_PUBLIC_APP_URL: https://staging.teachnotes.fyi
+      NEXT_PUBLIC_SUPABASE_URL: https://staging-api.teachnotes.fyi
+      SUPABASE_INTERNAL_URL: http://kong:8000
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    restart: unless-stopped
+    networks: [teachnotes-staging]
+    logging: &logging
+      driver: json-file
+      options: { max-size: 10m, max-file: "5" }
+
+  cloudflared:
+    container_name: teachnotes-staging-cloudflared
+    image: cloudflare/cloudflared:2026.7.1
+    command: tunnel --no-autoupdate run
+    env_file:
+      - ${STAGING_SECRET_DIR}/tunnel.env
+    depends_on:
+      web: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [teachnotes-staging]
+    logging: *logging
+
+networks:
+  teachnotes-staging:
+    external: true
+    name: teachnotes-staging
