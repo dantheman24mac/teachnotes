@@ -10,9 +10,9 @@ import { useOffline } from "./offline-provider";
 export function LessonEditor({ initialLesson }: { initialLesson: Lesson }) {
   const [lesson, setLesson] = useState(initialLesson);
   const [saved, setSaved] = useState(false);
-  const { online, syncNow } = useOffline();
+  const { online, syncNow, userId } = useOffline();
   async function save() {
-    const updated = await queueLessonPatch(initialLesson, { status: lesson.status, notes: lesson.notes, billingOverride: lesson.billingOverride });
+    const updated = await queueLessonPatch(userId, initialLesson, { status: lesson.status, notes: lesson.notes, billingOverride: lesson.billingOverride });
     setLesson(updated); setSaved(true); setTimeout(() => setSaved(false), 1800);
     if (online) void syncNow();
   }
