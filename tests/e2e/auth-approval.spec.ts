@@ -608,6 +608,7 @@ test.describe("authenticated account approval", () => {
   test("workspace month invoice bounds persist in snapshots", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     test.skip(testInfo.project.name !== "desktop", "The authenticated invoice regression runs once in the desktop project");
+    test.skip(missingAdminConfiguration.length > 0, `Missing authenticated admin configuration: ${missingAdminConfiguration.join(", ")}`);
 
     const admin = serviceClient();
     const adminAccount = await accountByEmail(admin, adminEmail);
@@ -823,13 +824,14 @@ test.describe("authenticated account approval", () => {
         { id: crypto.randomUUID(), starts_at: withinMonth(8), duration_minutes: 54, status: "attended", invoiced_at: null, deleted_at: new Date().toISOString() },
         { id: crypto.randomUUID(), starts_at: withinMonth(10), duration_minutes: 55, status: "canceled_rescheduled", invoiced_at: null, deleted_at: null },
         { id: crypto.randomUUID(), starts_at: outOfMonthDate.toISOString(), duration_minutes: 56, status: "attended", invoiced_at: null, deleted_at: null },
+        { id: crypto.randomUUID(), starts_at: withinMonth(12), duration_minutes: 57, status: "no_show", invoiced_at: null, deleted_at: null, billing_override: "non_billable" },
       ];
       const { error: lessonError } = await direct.from("lessons").insert(fixtureLessons.map((lesson) => ({
         ...lesson,
         owner_id: userId,
         student_id: student!.id,
         rate_cents: 45000,
-        billing_override: "default",
+        billing_override: "billing_override" in lesson ? lesson.billing_override : "default",
         notes: "",
       })));
       expect(lessonError).toBeNull();
@@ -855,11 +857,14 @@ test.describe("authenticated account approval", () => {
       await expect(preview.getByText("2 eligible lessons", { exact: true })).toBeVisible();
       await expect(preview.getByText("41 min", { exact: true })).toBeVisible();
       await expect(preview.getByText("42 min", { exact: true })).toBeVisible();
-      for (const duration of [51, 52, 53, 54, 55, 56]) {
+      for (const duration of [51, 52, 53, 54, 55, 56, 57]) {
         await expect(preview.getByText(`${duration} min`, { exact: true })).toHaveCount(0);
       }
     } finally {
-      if (userId) await admin.auth.admin.deleteUser(userId).catch(() => undefined);
+      if (userId) {
+        const { error } = await admin.auth.admin.deleteUser(userId);
+        expect(error).toBeNull();
+      }
     }
   });
 });
