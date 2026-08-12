@@ -1,0 +1,65 @@
+name: teachnotes-staging-supabase
+
+x-staging-logging: &staging-logging
+  driver: json-file
+  options: { max-size: 10m, max-file: "5" }
+
+services:
+  studio:
+    container_name: teachnotes-staging-studio
+    logging: *staging-logging
+  kong:
+    container_name: teachnotes-staging-kong
+    ports: !override
+      - "127.0.0.1:18000:8000/tcp"
+      - "127.0.0.1:18443:8443/tcp"
+    networks:
+      default: { aliases: [api-gw] }
+      teachnotes-staging: { aliases: [kong] }
+    logging: *staging-logging
+  auth:
+    container_name: teachnotes-staging-auth
+    environment:
+      GOTRUE_SECURITY_CAPTCHA_ENABLED: "true"
+      GOTRUE_SECURITY_CAPTCHA_PROVIDER: turnstile
+      GOTRUE_SECURITY_CAPTCHA_SECRET: ${TURNSTILE_SECRET_KEY}
+      GOTRUE_PASSWORD_MIN_LENGTH: "12"
+    logging: *staging-logging
+  rest:
+    container_name: teachnotes-staging-rest
+    logging: *staging-logging
+  realtime:
+    container_name: realtime-staging.supabase-realtime
+    healthcheck:
+      # The pinned Supabase self-hosted stack seeds this internal Realtime
+      # tenant name. It is not the public staging environment identifier.
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://localhost:4000/api/tenants/realtime-dev/health"]
+    logging: *staging-logging
+  storage:
+    container_name: teachnotes-staging-storage
+    logging: *staging-logging
+  imgproxy:
+    container_name: teachnotes-staging-imgproxy
+    logging: *staging-logging
+  meta:
+    container_name: teachnotes-staging-meta
+    logging: *staging-logging
+  functions:
+    container_name: teachnotes-staging-edge-functions
+    logging: *staging-logging
+  db:
+    container_name: teachnotes-staging-db
+    ports:
+      - "127.0.0.1:15433:5432/tcp"
+    logging: *staging-logging
+  supavisor:
+    container_name: teachnotes-staging-pooler
+    ports: !override
+      - "127.0.0.1:15432:5432/tcp"
+      - "127.0.0.1:16543:6543/tcp"
+    logging: *staging-logging
+
+networks:
+  teachnotes-staging:
+    external: true
+    name: teachnotes-staging

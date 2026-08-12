@@ -5,6 +5,7 @@ import { retryInvoiceArtifacts, voidInvoice } from "@/app/actions";
 import { PendingSubmitButton } from "@/components/pending-submit-button";
 import { getInvoice } from "@/lib/data";
 import { formatZar } from "@/lib/domain";
+import { formatInWorkspaceTime, getWorkspaceDateKey } from "@/lib/timezone";
 
 export default async function InvoicePage({
   params,
@@ -16,7 +17,8 @@ export default async function InvoicePage({
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const invoice = await getInvoice(id);
   if (!invoice) notFound();
-  const month = invoice.periodStart.slice(0, 7);
+  const settings = invoice.tutorSnapshot;
+  const month = getWorkspaceDateKey(invoice.periodStart, settings.timezone).slice(0, 7);
   const isSpreadsheet = invoice.documentFormat === "spreadsheet_v1";
   const artifactsReady = Boolean(invoice.xlsxPath && invoice.pdfPath);
   const canDownload = invoice.status !== "draft";
@@ -27,8 +29,8 @@ export default async function InvoicePage({
     {query.artifact === "ready" && <div className="artifact-notice success" role="status"><strong>Excel and PDF are ready.</strong><span>Both files were rebuilt from the immutable invoice snapshot.</span></div>}
     <div className="invoice-document section-card">
       <div className="document-head"><div><p className="eyebrow">{invoice.kind === "consolidated" ? "All-students invoice" : "Student invoice"}</p><h1>{invoice.number || "Draft invoice"}</h1><p>Issued to {invoice.recipientName}</p></div><div className={`document-seal ${invoice.status}`}><ShieldCheck />{invoice.status}</div></div>
-      <div className="document-meta"><span><small>Period</small><strong>{new Intl.DateTimeFormat("en-ZA", { month: "long", year: "numeric" }).format(new Date(invoice.periodStart))}</strong></span><span><small>Issued</small><strong>{invoice.issuedAt ? new Date(invoice.issuedAt).toLocaleDateString("en-ZA") : "Not finalized"}</strong></span><span><small>Due</small><strong>{invoice.dueAt ? new Date(invoice.dueAt).toLocaleDateString("en-ZA") : "—"}</strong></span></div>
-      <div className="invoice-lines-document">{invoice.lines.map((line) => <div key={line.lessonId}><span>{new Date(line.lessonDate).toLocaleDateString("en-ZA")}</span><span>{line.studentName}</span><span>{line.durationMinutes} minutes</span><strong>{formatZar(line.amountCents)}</strong></div>)}</div>
+      <div className="document-meta"><span><small>Period</small><strong>{formatInWorkspaceTime(invoice.periodStart, settings.timezone, { month: "long", year: "numeric" })}</strong></span><span><small>Issued</small><strong>{invoice.issuedAt ? formatInWorkspaceTime(invoice.issuedAt, settings.timezone, { day: "numeric", month: "numeric", year: "numeric" }) : "Not finalized"}</strong></span><span><small>Due</small><strong>{invoice.dueAt ? formatInWorkspaceTime(invoice.dueAt, settings.timezone, { day: "numeric", month: "numeric", year: "numeric" }) : "—"}</strong></span></div>
+      <div className="invoice-lines-document">{invoice.lines.map((line) => <div key={line.lessonId}><span>{formatInWorkspaceTime(line.lessonDate, settings.timezone, { day: "numeric", month: "numeric", year: "numeric" })}</span><span>{line.studentName}</span><span>{line.durationMinutes} minutes</span><strong>{formatZar(line.amountCents)}</strong></div>)}</div>
       <div className="document-total"><span>{invoice.status === "draft" ? "Current preview" : "Total due"}</span><strong>{formatZar(invoice.totalCents)}</strong></div>
       {invoice.status === "void" && <div className="void-notice"><strong>Voided</strong><span>{invoice.voidReason}</span></div>}
     </div>

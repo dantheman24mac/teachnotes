@@ -40,3 +40,11 @@ export function getWorkspaceMonthBounds(month: string, timezone: string) {
     end: startOfWorkspaceDate(nextMonthKey, timezone),
   };
 }
+
+export function getWorkspaceInvoicePeriod(month: string, timezone: string) {
+  const { start, end } = getWorkspaceMonthBounds(month, timezone);
+  return {
+    start,
+    end: new Date(end.getTime() - 1),
+  };
+}

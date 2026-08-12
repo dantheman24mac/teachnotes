@@ -1,7 +1,12 @@
 import type { MetadataRoute } from "next";
+import { parseEnvironment } from "@/lib/runtime-environment";
 
 export default function robots(): MetadataRoute.Robots {
-  const demo = process.env.DEMO_MODE === "true";
+  const environment = parseEnvironment();
+  if (environment === "staging") {
+    return { rules: { userAgent: "*", disallow: "/" } };
+  }
+  const demo = environment === "demo";
   return {
     rules: demo
       ? { userAgent: "*", allow: "/", disallow: "/api/" }

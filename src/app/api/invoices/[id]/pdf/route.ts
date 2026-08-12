@@ -24,8 +24,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (invoice.pdfPath) {
       const supabase = await createClient();
       const { data, error } = await supabase.storage.from("invoices").download(invoice.pdfPath);
-      if (error) return new Response("Invoice PDF is unavailable", { status: 503, headers: { "cache-control": "private, no-store" } });
       if (data) return new Response(data, { headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename="${filename}"`, "cache-control": "private, no-store" } });
+      if (error && invoice.documentFormat === "spreadsheet_v1") {
+        return new Response("Invoice PDF is unavailable", { status: 503, headers: { "cache-control": "private, no-store" } });
+      }
     }
   }
   if (invoice.documentFormat !== "legacy_pdf") {

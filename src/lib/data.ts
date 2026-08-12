@@ -4,7 +4,7 @@ import { calculateInvoiceTotal, isBillable } from "./domain";
 import { expandSeries } from "./recurrence";
 import { requireApprovedUser } from "./auth";
 import { createClient, isSupabaseConfigured } from "./supabase/server";
-import { getWorkspaceMonthBounds } from "./timezone";
+import { getWorkspaceInvoicePeriod } from "./timezone";
 import type { BusinessSettings, Invoice, InvoiceRecipientSnapshot, Lesson, Student } from "./types";
 
 function mapStudent(row: Record<string, unknown>): Student {
@@ -44,17 +44,17 @@ function mapLesson(row: Record<string, unknown>): Lesson {
 function mapTutorSnapshot(value: unknown): BusinessSettings {
   const snapshot = (value && typeof value === "object" ? value : {}) as Partial<BusinessSettings>;
   return {
-    tutorName: String(snapshot.tutorName ?? ""),
-    tutorEmail: String(snapshot.tutorEmail ?? ""),
-    tutorPhone: String(snapshot.tutorPhone ?? ""),
-    tutorAddress: String(snapshot.tutorAddress ?? ""),
-    defaultPayerName: String(snapshot.defaultPayerName ?? ""),
-    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? ""),
-    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? ""),
-    paymentTermsDays: Number(snapshot.paymentTermsDays ?? 7),
-    bankDetails: String(snapshot.bankDetails ?? ""),
-    invoicePrefix: String(snapshot.invoicePrefix ?? "INV"),
-    timezone: String(snapshot.timezone ?? "Africa/Johannesburg"),
+    tutorName: String(snapshot.tutorName ?? demoSettings.tutorName),
+    tutorEmail: String(snapshot.tutorEmail ?? demoSettings.tutorEmail),
+    tutorPhone: String(snapshot.tutorPhone ?? demoSettings.tutorPhone),
+    tutorAddress: String(snapshot.tutorAddress ?? demoSettings.tutorAddress),
+    defaultPayerName: String(snapshot.defaultPayerName ?? demoSettings.defaultPayerName),
+    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? demoSettings.defaultPayerEmail),
+    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? demoSettings.defaultPayerAddress),
+    paymentTermsDays: Number(snapshot.paymentTermsDays ?? demoSettings.paymentTermsDays),
+    bankDetails: String(snapshot.bankDetails ?? demoSettings.bankDetails),
+    invoicePrefix: String(snapshot.invoicePrefix ?? demoSettings.invoicePrefix),
+    timezone: String(snapshot.timezone ?? demoSettings.timezone),
     currency: "ZAR",
   };
 }
@@ -268,13 +268,16 @@ export async function getInvoice(id: string) {
   return data ? mapInvoice(data) : null;
 }
 
-export async function getInvoicePreview(month: string, studentId?: string, timezone?: string) {
-  const resolvedTimezone = timezone ?? (await getBusinessSettings()).timezone;
-  const { start, end } = getWorkspaceMonthBounds(month, resolvedTimezone);
-  const inclusiveEnd = new Date(end.getTime() - 1);
-  const lessons = await getLessons({ from: start.toISOString(), to: inclusiveEnd.toISOString(), studentId });
+export async function getInvoicePreview(
+  month: string,
+  studentId?: string,
+  settingsOverride?: BusinessSettings,
+) {
+  const settings = settingsOverride ?? await getBusinessSettings();
+  const period = getWorkspaceInvoicePeriod(month, settings.timezone);
+  const lessons = await getLessons({ from: period.start.toISOString(), to: period.end.toISOString(), studentId });
   const eligible = lessons.filter(
     (lesson) => !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride),
   );
-  return { lessons: eligible, totalCents: calculateInvoiceTotal(eligible) };
+  return { lessons: eligible, totalCents: calculateInvoiceTotal(eligible), period, settings };
 }

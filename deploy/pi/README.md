@@ -2,6 +2,34 @@
 
 This deployment keeps TeachNotes, PostgreSQL, Auth, REST and invoice Storage on one ARM64 Raspberry Pi. Cloudflare Tunnel is the only public ingress; no router ports or database ports are opened.
 
+## Persistent staging environment
+
+Staging is a second deployment at `staging.teachnotes.fyi` with its own Supabase
+stack at `staging-api.teachnotes.fyi`. Its Compose projects, networks, volumes,
+release worktrees, credentials, Auth users, Storage objects, and fictional records
+are independent of production.
+
+```bash
+scripts/setup-staging-pi.sh                 # one-time provision after Cloudflare bootstrap
+scripts/deploy-staging-pi.sh                # any clean, pushed branch with successful CI
+scripts/verify-staging-pi.sh                # isolation, routes, identity and API checks
+scripts/approve-staging-pi.sh <full-sha>    # explicit exact-SHA production approval
+scripts/reset-staging-pi.sh --confirm-destroy-staging
+```
+
+The reset command stops only the staging projects and moves the previous database
+and Storage data into `/srv/teachnotes-staging/reset-archives/`. Staging secrets
+live only in `/srv/teachnotes-staging/secrets/`; releases and atomic SHA/approval
+records live only in `/home/dantheman/releases/teachnotes-staging/`. Supabase is
+fetched from immutable official commit `244301c09ddba21aa963ebea09e712ce89b0401a`
+(the `self-hosted/v0.7.0` release used by production), never copied from the
+production installation.
+
+Production deployment now accepts only the exact pushed `origin/main` tip after
+successful CI, a healthy public staging deployment at the same SHA, and an
+approval created after that staging deployment. Every staging deploy or reset
+invalidates the previous approval.
+
 ## Topology
 
 - `teachnotes.fyi` routes through Cloudflare Tunnel to `http://web:3000`.

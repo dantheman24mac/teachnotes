@@ -11,7 +11,6 @@ import { expandSeries } from "@/lib/recurrence";
 import { getBusinessSettings, getInvoice, getInvoicePreview, getStudent } from "@/lib/data";
 import { generateInvoiceArtifacts, INVOICE_ARTIFACT_MIME } from "@/lib/invoice-artifacts";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getWorkspaceMonthBounds } from "@/lib/timezone";
 import type { Invoice } from "@/lib/types";
 
 async function requireUser() {
@@ -36,6 +35,10 @@ const studentSchema = z.object({
 });
 
 export type StudentArchiveState = { message: string };
+export type StudentDefaultsState = {
+  status: "idle" | "success" | "error";
+  message: string;
+};
 
 function revalidateStudentArchivePaths(studentId: string) {
   revalidatePath("/students");
@@ -170,18 +173,47 @@ export async function rescheduleLesson(formData: FormData) {
   revalidatePath("/today");
 }
 
-export async function updateStudentDefaults(formData: FormData) {
-  if (!isSupabaseConfigured()) return;
-  await requireUser();
-  const studentId = z.string().uuid().parse(formData.get("studentId"));
-  const duration = z.coerce.number().int().min(15).max(240).parse(formData.get("duration"));
-  const rateCents = Math.round(z.coerce.number().min(0).parse(formData.get("rateRand")) * 100);
+export async function updateStudentDefaults(_previousState: StudentDefaultsState, formData: FormData): Promise<StudentDefaultsState> {
+  if (!isSupabaseConfigured()) return { status: "error", message: "Student defaults cannot be changed in the portfolio demo." };
+  const parsed = z.object({
+    studentId: z.string().uuid(),
+    duration: z.coerce.number().int().min(15).max(240),
+    rateRand: z.coerce.number().min(0),
+  }).safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { status: "error", message: "Enter a duration from 15 to 240 minutes and a valid lesson amount." };
+  const user = await requireUser();
+  const { studentId, duration, rateRand } = parsed.data;
+  const rateCents = Math.round(rateRand * 100);
   const applyFuture = formData.get("applyFuture") === "on";
   const supabase = await createClient();
-  const { error } = await supabase.from("students").update({ default_duration_minutes: duration, default_rate_cents: rateCents }).eq("id", studentId).is("deleted_at", null);
-  if (error) throw error;
-  if (applyFuture) await supabase.from("lessons").update({ duration_minutes: duration, rate_cents: rateCents }).eq("student_id", studentId).eq("status", "scheduled").is("invoiced_at", null).gt("starts_at", new Date().toISOString());
+  const { data: updatedStudent, error } = await supabase
+    .from("students")
+    .update({ default_duration_minutes: duration, default_rate_cents: rateCents })
+    .eq("id", studentId)
+    .eq("owner_id", user.id)
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error || !updatedStudent) return { status: "error", message: "We couldn’t save these lesson defaults. Nothing was changed." };
+  if (applyFuture) {
+    const { error: futureError } = await supabase
+      .from("lessons")
+      .update({ duration_minutes: duration, rate_cents: rateCents })
+      .eq("owner_id", user.id)
+      .eq("student_id", studentId)
+      .eq("status", "scheduled")
+      .is("invoiced_at", null)
+      .is("deleted_at", null)
+      .gt("starts_at", new Date().toISOString());
+    if (futureError) return { status: "error", message: "The student defaults were saved, but future lessons could not be updated." };
+  }
+  revalidatePath("/students");
   revalidatePath(`/students/${studentId}`);
+  revalidatePath("/calendar");
+  revalidatePath("/today");
+  revalidatePath("/invoices/new");
+  revalidatePath("/lessons/[id]", "page");
+  return { status: "success", message: applyFuture ? "Defaults and future scheduled lessons saved." : "Lesson defaults saved." };
 }
 
 export async function saveSettings(formData: FormData) {
@@ -203,14 +235,16 @@ async function storeInvoiceArtifacts(userId: string, invoice: Invoice) {
   const xlsxPath = `${folder}/${artifacts.baseName}.xlsx`;
   const pdfPath = `${folder}/${artifacts.baseName}.pdf`;
   const supabase = await createClient();
-  await storeImmutableInvoiceArtifact(supabase, xlsxPath, artifacts.xlsx, INVOICE_ARTIFACT_MIME.xlsx, "PK");
-  await storeImmutableInvoiceArtifact(supabase, pdfPath, artifacts.pdf, INVOICE_ARTIFACT_MIME.pdf, "%PDF-");
+  await storeImmutableInvoiceArtifact(supabase, xlsxPath, artifacts.xlsx, INVOICE_ARTIFACT_MIME.xlsx);
+  await storeImmutableInvoiceArtifact(supabase, pdfPath, artifacts.pdf, INVOICE_ARTIFACT_MIME.pdf);
   const { error: updateError } = await supabase
     .from("invoices")
     .update({ xlsx_path: xlsxPath, pdf_path: pdfPath })
     .eq("id", invoice.id)
     .eq("owner_id", userId)
-    .eq("document_format", "spreadsheet_v1");
+    .eq("document_format", "spreadsheet_v1")
+    .select("id")
+    .single();
   if (updateError) throw updateError;
 }
 
@@ -219,7 +253,6 @@ async function storeImmutableInvoiceArtifact(
   path: string,
   contents: Buffer,
   contentType: string,
-  signature: string,
 ) {
   const bucket = supabase.storage.from("invoices");
   const { error: uploadError } = await bucket.upload(path, contents, { contentType, upsert: false });
@@ -227,8 +260,8 @@ async function storeImmutableInvoiceArtifact(
 
   const { data: existing, error: downloadError } = await bucket.download(path);
   if (downloadError || !existing) throw uploadError;
-  const prefix = Buffer.from(await existing.slice(0, signature.length).arrayBuffer()).toString("ascii");
-  if (prefix !== signature) throw uploadError;
+  const existingContents = Buffer.from(await existing.arrayBuffer());
+  if (!existingContents.equals(contents)) throw uploadError;
 }
 
 export async function finalizeInvoice(formData: FormData) {
@@ -239,18 +272,15 @@ export async function finalizeInvoice(formData: FormData) {
   const studentIdValue = String(formData.get("studentId") ?? "");
   const studentId = kind === "student" ? z.string().uuid().parse(studentIdValue) : undefined;
   const settings = await getBusinessSettings();
-  const { lessons, totalCents } = await getInvoicePreview(month, studentId, settings.timezone);
+  const { lessons, totalCents, period } = await getInvoicePreview(month, studentId, settings);
   if (!lessons.length) throw new Error("There are no uninvoiced billable lessons in this selection");
   const student = studentId ? await getStudent(studentId, { includeArchived: true }) : null;
   const recipient = kind === "consolidated" ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress } : { name: student?.guardianName || student?.displayName || "Client", email: student?.billingEmail || "", address: student?.billingAddress || "" };
-  const monthBounds = getWorkspaceMonthBounds(month, settings.timezone);
-  const periodStart = monthBounds.start;
-  const periodEnd = new Date(monthBounds.end.getTime() - 1);
   const supabase = await createClient();
   const { data: number, error: numberError } = await supabase.rpc("next_invoice_number", { p_prefix: settings.invoicePrefix });
   if (numberError) throw numberError;
   const dueAt = addDays(new Date(), settings.paymentTermsDays);
-  const { data: invoiceRow, error } = await supabase.from("invoices").insert({ owner_id: user.id, number, kind, status: "finalized", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: periodStart.toISOString(), period_end: periodEnd.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents, issued_at: new Date().toISOString(), due_at: dueAt.toISOString() }).select("id").single();
+  const { data: invoiceRow, error } = await supabase.from("invoices").insert({ owner_id: user.id, number, kind, status: "finalized", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents, issued_at: new Date().toISOString(), due_at: dueAt.toISOString() }).select("id").single();
   if (error) throw error;
   const lines = lessons.map((lesson) => ({ invoice_id: invoiceRow.id, lesson_id: lesson.id, student_name: lesson.studentName, lesson_date: lesson.startsAt, duration_minutes: lesson.durationMinutes, lesson_status: lesson.status, amount_cents: lesson.rateCents }));
   const { error: lineError } = await supabase.from("invoice_lines").insert(lines);
@@ -279,18 +309,15 @@ export async function saveDraftInvoice(formData: FormData) {
   const rawStudentId = String(formData.get("studentId") ?? "");
   const studentId = kind === "student" ? z.string().uuid().parse(rawStudentId) : undefined;
   const settings = await getBusinessSettings();
-  const [{ totalCents }, student] = await Promise.all([
-    getInvoicePreview(month, studentId, settings.timezone),
+  const [{ totalCents, period }, student] = await Promise.all([
+    getInvoicePreview(month, studentId, settings),
     studentId ? getStudent(studentId, { includeArchived: true }) : Promise.resolve(null),
   ]);
   const recipient = kind === "consolidated"
     ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress }
     : { name: student?.guardianName || student?.displayName || "Client", email: student?.billingEmail || "", address: student?.billingAddress || "" };
-  const monthBounds = getWorkspaceMonthBounds(month, settings.timezone);
-  const periodStart = monthBounds.start;
-  const periodEnd = new Date(monthBounds.end.getTime() - 1);
   const supabase = await createClient();
-  const { data, error } = await supabase.from("invoices").insert({ owner_id: user.id, kind, status: "draft", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: periodStart.toISOString(), period_end: periodEnd.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents }).select("id").single();
+  const { data, error } = await supabase.from("invoices").insert({ owner_id: user.id, kind, status: "draft", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents }).select("id").single();
   if (error) throw error;
   redirect(`/invoices/${data.id}`);
 }
