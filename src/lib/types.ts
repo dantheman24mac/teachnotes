@@ -7,6 +7,7 @@ export type LessonStatus =
 export type BillingOverride = "default" | "billable" | "non_billable";
 export type InvoiceKind = "consolidated" | "student";
 export type InvoiceStatus = "draft" | "finalized" | "void";
+export type InvoiceDocumentFormat = "legacy_pdf" | "spreadsheet_v1";
 
 export interface Student {
   id: string;
@@ -73,6 +74,12 @@ export interface InvoiceLine {
   amountCents: number;
 }
 
+export interface InvoiceRecipientSnapshot {
+  name: string;
+  email: string;
+  address: string;
+}
+
 export interface Invoice {
   id: string;
   number: string | null;
@@ -82,10 +89,15 @@ export interface Invoice {
   periodStart: string;
   periodEnd: string;
   recipientName: string;
+  recipientSnapshot: InvoiceRecipientSnapshot;
+  tutorSnapshot: BusinessSettings;
   totalCents: number;
   issuedAt?: string | null;
   dueAt?: string | null;
   voidReason?: string | null;
+  documentFormat: InvoiceDocumentFormat;
+  pdfPath?: string | null;
+  xlsxPath?: string | null;
   lines: InvoiceLine[];
 }
 

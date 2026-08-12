@@ -4,7 +4,8 @@ import { calculateInvoiceTotal, isBillable } from "./domain";
 import { expandSeries } from "./recurrence";
 import { requireApprovedUser } from "./auth";
 import { createClient, isSupabaseConfigured } from "./supabase/server";
-import type { BusinessSettings, Invoice, Lesson, Student } from "./types";
+import { getWorkspaceMonthBounds } from "./timezone";
+import type { BusinessSettings, Invoice, InvoiceRecipientSnapshot, Lesson, Student } from "./types";
 
 function mapStudent(row: Record<string, unknown>): Student {
   return {
@@ -37,6 +38,69 @@ function mapLesson(row: Record<string, unknown>): Lesson {
     version: Number(row.version),
     syncRevision: Number(row.sync_revision),
     invoiced: Boolean(row.invoiced_at ?? row.invoiced),
+  };
+}
+
+function mapTutorSnapshot(value: unknown): BusinessSettings {
+  const snapshot = (value && typeof value === "object" ? value : {}) as Partial<BusinessSettings>;
+  return {
+    tutorName: String(snapshot.tutorName ?? ""),
+    tutorEmail: String(snapshot.tutorEmail ?? ""),
+    tutorPhone: String(snapshot.tutorPhone ?? ""),
+    tutorAddress: String(snapshot.tutorAddress ?? ""),
+    defaultPayerName: String(snapshot.defaultPayerName ?? ""),
+    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? ""),
+    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? ""),
+    paymentTermsDays: Number(snapshot.paymentTermsDays ?? 7),
+    bankDetails: String(snapshot.bankDetails ?? ""),
+    invoicePrefix: String(snapshot.invoicePrefix ?? "INV"),
+    timezone: String(snapshot.timezone ?? "Africa/Johannesburg"),
+    currency: "ZAR",
+  };
+}
+
+function mapRecipientSnapshot(value: unknown): InvoiceRecipientSnapshot {
+  const snapshot = (value && typeof value === "object" ? value : {}) as Partial<InvoiceRecipientSnapshot>;
+  return {
+    name: String(snapshot.name ?? ""),
+    email: String(snapshot.email ?? ""),
+    address: String(snapshot.address ?? ""),
+  };
+}
+
+type InvoiceDatabaseRow = Record<string, unknown> & { invoice_lines?: Array<Record<string, unknown>> };
+
+function mapInvoice(row: InvoiceDatabaseRow): Invoice {
+  const recipientSnapshot = mapRecipientSnapshot(row.recipient_snapshot);
+  return {
+    id: String(row.id),
+    number: row.number ? String(row.number) : null,
+    kind: row.kind as Invoice["kind"],
+    studentId: row.student_id ? String(row.student_id) : null,
+    status: row.status as Invoice["status"],
+    periodStart: String(row.period_start),
+    periodEnd: String(row.period_end),
+    recipientName: recipientSnapshot.name,
+    recipientSnapshot,
+    tutorSnapshot: mapTutorSnapshot(row.tutor_snapshot),
+    totalCents: Number(row.total_cents),
+    issuedAt: row.issued_at ? String(row.issued_at) : null,
+    dueAt: row.due_at ? String(row.due_at) : null,
+    voidReason: row.void_reason ? String(row.void_reason) : null,
+    documentFormat: row.document_format === "spreadsheet_v1" ? "spreadsheet_v1" : "legacy_pdf",
+    pdfPath: row.pdf_path ? String(row.pdf_path) : null,
+    xlsxPath: row.xlsx_path ? String(row.xlsx_path) : null,
+    lines: (row.invoice_lines ?? [])
+      .map((line: Record<string, unknown>) => ({
+        id: String(line.id),
+        lessonId: String(line.lesson_id),
+        studentName: String(line.student_name),
+        lessonDate: String(line.lesson_date),
+        durationMinutes: Number(line.duration_minutes),
+        status: line.lesson_status as Lesson["status"],
+        amountCents: Number(line.amount_cents),
+      }))
+      .sort((left: { lessonDate: string }, right: { lessonDate: string }) => left.lessonDate.localeCompare(right.lessonDate)),
   };
 }
 
@@ -188,39 +252,27 @@ export async function getInvoices(): Promise<Invoice[]> {
     .select("*, invoice_lines(*)")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    number: row.number,
-    kind: row.kind,
-    studentId: row.student_id,
-    status: row.status,
-    periodStart: row.period_start,
-    periodEnd: row.period_end,
-    recipientName: row.recipient_snapshot?.name ?? "",
-    totalCents: row.total_cents,
-    issuedAt: row.issued_at,
-    dueAt: row.due_at,
-    voidReason: row.void_reason,
-    lines: (row.invoice_lines ?? []).map((line: Record<string, unknown>) => ({
-      id: String(line.id),
-      lessonId: String(line.lesson_id),
-      studentName: String(line.student_name),
-      lessonDate: String(line.lesson_date),
-      durationMinutes: Number(line.duration_minutes),
-      status: line.lesson_status as Lesson["status"],
-      amountCents: Number(line.amount_cents),
-    })),
-  }));
+  return (data ?? []).map(mapInvoice);
 }
 
 export async function getInvoice(id: string) {
-  return (await getInvoices()).find((invoice) => invoice.id === id) ?? null;
+  if (!isSupabaseConfigured()) return demoInvoices.find((invoice) => invoice.id === id) ?? null;
+  await requireApprovedUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*, invoice_lines(*)")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapInvoice(data) : null;
 }
 
-export async function getInvoicePreview(month: string, studentId?: string) {
-  const start = new Date(`${month}-01T00:00:00+02:00`);
-  const end = endOfMonth(start);
-  const lessons = await getLessons({ from: start.toISOString(), to: end.toISOString(), studentId });
+export async function getInvoicePreview(month: string, studentId?: string, timezone?: string) {
+  const resolvedTimezone = timezone ?? (await getBusinessSettings()).timezone;
+  const { start, end } = getWorkspaceMonthBounds(month, resolvedTimezone);
+  const inclusiveEnd = new Date(end.getTime() - 1);
+  const lessons = await getLessons({ from: start.toISOString(), to: inclusiveEnd.toISOString(), studentId });
   const eligible = lessons.filter(
     (lesson) => !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride),
   );

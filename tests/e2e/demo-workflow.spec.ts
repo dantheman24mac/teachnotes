@@ -47,7 +47,7 @@ test("invoice preview groups billable lessons", async ({ page }) => {
   await page.goto("/invoices/new");
   await expect(page.getByRole("heading", { name: "New invoice" })).toBeVisible();
   await expect(page.getByText("Invoice total")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Finalize & create PDF" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finalize & create Excel + PDF" })).toBeVisible();
   await page.getByLabel("Invoice type").selectOption("student");
   await expect(page.getByLabel("Student").locator("option", { hasText: "Maya Petersen (Archived)" })).toHaveCount(1);
 });

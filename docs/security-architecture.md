@@ -14,6 +14,8 @@ The application emits HSTS, MIME sniffing protection, frame denial, a restrictiv
 
 Authenticated application responses and APIs are private and non-cacheable. The service worker caches only versioned static assets and a user-neutral offline shell. Offline lesson data is stored in an IndexedDB database namespaced by user ID and cleared during sign-out.
 
+Finalized spreadsheet invoices are generated only from owner-scoped database snapshots. Their Excel and converted PDF files share the existing private Storage boundary and owner-folder policies; temporary conversion files use isolated per-run directories and are deleted after LibreOffice exits.
+
 ## Demo isolation
 
 `demo.teachnotes.fyi` is built from the production source commit but runs as a separate container. It receives no production environment file, Supabase URL, publishable key, service-role key or Tunnel token. It is attached only to the `teachnotes-demo` Docker network. The Cloudflare connector is the sole container attached to both the production and demo networks.
