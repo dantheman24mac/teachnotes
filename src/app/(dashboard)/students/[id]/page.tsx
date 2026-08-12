@@ -1,8 +1,8 @@
 import { Archive, ArrowLeft, BookOpenText, CalendarDays, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { updateStudentDefaults } from "@/app/actions";
 import { ArchiveStudentControl, RestoreStudentControl } from "@/components/student-archive-controls";
+import { StudentDefaultsForm } from "@/components/student-defaults-form";
 import { getBusinessSettings, getLessons, getStudent } from "@/lib/data";
 import { formatZar } from "@/lib/domain";
 import { formatInWorkspaceTime } from "@/lib/timezone";
@@ -32,7 +32,7 @@ export default async function StudentPage({ params }: { params: Promise<{ id: st
         <h2>{archived ? "Archived student" : "Lesson defaults"}</h2>
         {archived
           ? <RestoreStudentControl studentId={student.id} />
-          : <><form className="stack-form" action={updateStudentDefaults}><input type="hidden" name="studentId" value={student.id} /><label>Default duration<input name="duration" type="number" min="15" step="5" defaultValue={student.defaultDurationMinutes} /></label><label>Lesson amount (R)<input name="rateRand" type="number" min="0" step="0.01" defaultValue={(student.defaultRateCents / 100).toFixed(2)} /></label><label className="check-row"><input name="applyFuture" type="checkbox" />Apply to future scheduled lessons</label><button className="button-primary" type="submit">Save defaults</button></form><ArchiveStudentControl studentId={student.id} /></>}
+          : <><StudentDefaultsForm studentId={student.id} durationMinutes={student.defaultDurationMinutes} rateCents={student.defaultRateCents} /><ArchiveStudentControl studentId={student.id} /></>}
         <div className="contact-block"><span><Mail size={16} />{student.billingEmail || "No billing email"}</span></div>
       </aside>
     </div>

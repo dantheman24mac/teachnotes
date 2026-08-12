@@ -1,4 +1,4 @@
-import { isDemoMode } from "@/lib/supabase/server";
+import { assertEnvironmentConfiguration, parseEnvironment } from "@/lib/runtime-environment";
 
 function releaseSha() {
   const value = process.env.TEACHNOTES_RELEASE_SHA;
@@ -6,11 +6,14 @@ function releaseSha() {
 }
 
 export function GET() {
+  const environment = parseEnvironment();
+  assertEnvironmentConfiguration(environment);
   return Response.json(
     {
       ok: true,
       service: "teachnotes",
-      mode: isDemoMode() ? "demo" : "production",
+      mode: environment === "demo" ? "demo" : "production",
+      environment,
       releaseSha: releaseSha(),
     },
     { headers: { "cache-control": "no-store" } },

@@ -23,6 +23,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       if (data) return new Response(data, { headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename="${invoice.number ?? "invoice"}.pdf"`, "cache-control": "private, no-store" } });
     }
   }
-  const buffer = await renderInvoicePdf(invoice, await getBusinessSettings());
+  const buffer = await renderInvoicePdf(invoice, invoice.tutorSnapshot ?? await getBusinessSettings());
   return new Response(new Uint8Array(buffer), { headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename="${invoice.number ?? "invoice"}.pdf"`, "cache-control": "private, no-store" } });
 }

@@ -20,11 +20,13 @@ fi
 
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "invalid release SHA"
 [[ $branch =~ ^[A-Za-z0-9._/-]+$ ]] || die "invalid release branch"
+[[ $branch == main ]] || die "production releases are restricted to main"
 export TEACHNOTES_RELEASE_SHA=$sha
 
 repo=${TEACHNOTES_REPO:-/home/dantheman/code/teachnotes}
 release_root=${TEACHNOTES_RELEASE_ROOT:-/home/dantheman/releases/teachnotes}
 secret_dir=${TEACHNOTES_SECRET_DIR:-$repo/deploy/pi}
+[[ $release_root != *teachnotes-staging* && $secret_dir != *teachnotes-staging* ]] || die "staging release or secret path rejected by production deployment"
 release_dir="$release_root/$sha"
 current_sha_file="$release_root/current-sha"
 
@@ -41,6 +43,22 @@ flock -n 9 || die "another TeachNotes deployment is already running"
 
 remote_sha=$(git -C "$repo" rev-parse "refs/remotes/origin/${branch}^{commit}")
 [[ $remote_sha == "$sha" ]] || die "origin/$branch does not resolve to $sha on the Pi"
+main_sha=$(git -C "$repo" rev-parse 'refs/remotes/origin/main^{commit}')
+[[ $main_sha == "$sha" ]] || die "production SHA is not the exact origin/main tip"
+
+staging_root=/home/dantheman/releases/teachnotes-staging
+[[ -f $staging_root/current-sha && $(<"$staging_root/current-sha") == "$sha" ]] || die "staging current SHA does not match production candidate"
+[[ -f $staging_root/current-deployment && -f $staging_root/approval ]] || die "staging approval is missing"
+unset SHA DEPLOYED_AT APPROVED_AT HEALTH_SHA
+source "$staging_root/current-deployment"
+staging_deployed_at=$DEPLOYED_AT
+unset SHA DEPLOYED_AT APPROVED_AT HEALTH_SHA
+source "$staging_root/approval"
+[[ $SHA == "$sha" && $HEALTH_SHA == "$sha" ]] || die "staging approval SHA mismatch"
+[[ $DEPLOYED_AT == "$staging_deployed_at" && $APPROVED_AT > "$DEPLOYED_AT" ]] || die "staging approval is stale"
+staging_health=$(curl -fsS --retry 3 https://staging.teachnotes.fyi/api/health) || die "staging public health failed"
+grep -Eq '"environment"[[:space:]]*:[[:space:]]*"staging"' <<<"$staging_health" || die "staging public environment mismatch"
+grep -Eq "\"releaseSha\"[[:space:]]*:[[:space:]]*\"$sha\"" <<<"$staging_health" || die "staging public SHA mismatch"
 
 if [[ -s $current_sha_file ]]; then
   previous_sha=$(<"$current_sha_file")
@@ -82,6 +100,10 @@ link_secret() {
 
 link_secret app.env
 link_secret tunnel.env
+
+secret_text=$(<"$secret_dir/app.env")
+[[ $secret_text != *staging.teachnotes.fyi* && $secret_text != *staging-api.teachnotes.fyi* ]] || die "staging URL rejected by production deployment"
+[[ $secret_text != *teachnotes-staging* ]] || die "staging network or path rejected by production deployment"
 
 compose=(
   docker compose
