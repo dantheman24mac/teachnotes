@@ -16,6 +16,12 @@ test("tutor can navigate the demo lesson workflow", async ({ page }) => {
   await page.getByRole("link", { name: /Liam Jacobs/ }).click();
   await expect(page.getByRole("heading", { name: "Liam Jacobs" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /Previous lesson notes/ })).toBeVisible();
+  await page.getByRole("link", { name: "Edit student" }).click();
+  await expect(page.getByRole("heading", { name: "Edit Liam Jacobs" })).toBeVisible();
+  await expect(page.getByLabel("Student name")).toHaveValue("Liam Jacobs");
+  await page.getByRole("button", { name: "Save student" }).click();
+  await expect(page.getByText("Student details cannot be changed in the portfolio demo.", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Cancel" }).click();
   await expect(page.getByText("Archive student", { exact: true })).toBeVisible();
 });
 

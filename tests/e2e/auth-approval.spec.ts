@@ -224,6 +224,7 @@ test.describe("authenticated account approval", () => {
     const initialPasswordB = generatedCredential("initial-b");
     const finalPasswordA = generatedCredential("changed-a");
     const studentA = `Alice-only ${runId}`;
+    const editedStudentA = `Alice-edited ${runId}`;
     const studentB = `Bob-only ${runId}`;
     const legacyStudentId = crypto.randomUUID();
     const admin = serviceClient();
@@ -398,6 +399,45 @@ test.describe("authenticated account approval", () => {
       expect(crossTenantDefaults).toEqual([]);
 
       await page.goto(`/students/${rowsA![0].id}`);
+      await page.getByRole("link", { name: "Edit student" }).click();
+      await expect(page).toHaveURL(new RegExp(`/students/${rowsA![0].id}/edit$`));
+      await expect(page.getByLabel("Student name")).toHaveValue(studentA);
+      await expect(page.getByLabel("Billing contact")).toHaveValue("");
+      await page.locator("form.student-profile-form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Student name").fill("A");
+      await page.getByLabel("Billing email").fill("not-an-email");
+      await page.getByRole("button", { name: "Save student" }).click();
+      await expect(page.getByText("Enter a student name between 2 and 200 characters and a valid billing email.", { exact: true })).toBeVisible();
+      await page.getByLabel("Student name").fill(editedStudentA);
+      await page.getByLabel("Billing contact").fill("Alice Guardian");
+      await page.getByLabel("Billing email").fill("alice-accounts@example.test");
+      await page.getByLabel("Billing address").fill("1 Test Street\nCape Town");
+      await page.getByRole("button", { name: "Save student" }).click();
+      await expect(page).toHaveURL(new RegExp(`/students/${rowsA![0].id}$`));
+      await expect(page.getByRole("heading", { name: editedStudentA })).toBeVisible();
+      await expect(page.getByText("Alice Guardian · alice-accounts@example.test", { exact: true })).toBeVisible();
+
+      const { data: updatedProfile, error: updatedProfileError } = await directA
+        .from("students")
+        .select("display_name,guardian_name,billing_email,billing_address,default_duration_minutes,default_rate_cents")
+        .eq("id", rowsA![0].id)
+        .single();
+      expect(updatedProfileError).toBeNull();
+      expect(updatedProfile).toEqual({
+        display_name: editedStudentA,
+        guardian_name: "Alice Guardian",
+        billing_email: "alice-accounts@example.test",
+        billing_address: "1 Test Street\nCape Town",
+        default_duration_minutes: 60,
+        default_rate_cents: 45000,
+      });
+      await page.goto("/students");
+      await expect(page.getByText(editedStudentA, { exact: true })).toBeVisible();
+      await expect(page.getByText(studentA, { exact: true })).toHaveCount(0);
+      await page.goto("/calendar");
+      await expect(page.getByText(editedStudentA, { exact: true }).first()).toBeVisible();
+
+      await page.goto(`/students/${rowsA![0].id}`);
       await page.getByLabel("Default duration").fill("75");
       await page.getByLabel("Lesson amount (R)").fill("515.25");
       await page.getByLabel("Apply to future scheduled lessons").check();
@@ -455,6 +495,23 @@ test.describe("authenticated account approval", () => {
       await page.getByRole("button", { name: "Save defaults" }).click();
       await expect(page.getByText("We couldn’t save these lesson defaults. Nothing was changed.", { exact: true })).toBeVisible();
 
+      const staleProfileStudentId = crypto.randomUUID();
+      expect((await directA.from("students").insert({
+        id: staleProfileStudentId,
+        owner_id: accountA.user_id,
+        display_name: `Profile deleted before submit ${runId}`,
+        default_duration_minutes: 60,
+        default_rate_cents: 45000,
+      })).error).toBeNull();
+      await page.goto(`/students/${staleProfileStudentId}/edit`);
+      expect((await directA.rpc("archive_student", { p_student_id: staleProfileStudentId })).error).toBeNull();
+      await page.getByLabel("Student name").fill(`Should not save ${runId}`);
+      await page.getByRole("button", { name: "Save student" }).click();
+      await expect(page.getByText("We couldn’t save these student details. Nothing was changed.", { exact: true })).toBeVisible();
+
+      const crossTenantEditResponse = await userBPage.goto(`/students/${rowsA![0].id}/edit`);
+      expect(crossTenantEditResponse?.status()).toBe(404);
+
       const staleLessonPage = await page.context().newPage();
       const staleLessonResponse = await staleLessonPage.goto(`/lessons/${lessonFixtures[1].id}`);
       expect(staleLessonResponse?.status()).toBe(200);
@@ -468,7 +525,7 @@ test.describe("authenticated account approval", () => {
       await page.getByText("Archive student", { exact: true }).click();
       await page.getByRole("button", { name: "Confirm archive" }).click();
       await expect(page).toHaveURL(/\/students\?view=archived$/);
-      await expect(page.getByText(studentA, { exact: true })).toBeVisible();
+      await expect(page.getByText(editedStudentA, { exact: true })).toBeVisible();
 
       const { data: archivedStudent } = await directA.from("students").select("active,deleted_at").eq("id", rowsA![0].id).single();
       expect(archivedStudent?.active).toBe(false);
@@ -511,9 +568,9 @@ test.describe("authenticated account approval", () => {
       await expect(page.getByRole("button", { name: "Save lesson" })).toBeVisible();
 
       await page.goto("/calendar");
-      await expect(page.getByLabel("Student").locator("option", { hasText: studentA })).toHaveCount(0);
+      await expect(page.getByLabel("Student").locator("option", { hasText: editedStudentA })).toHaveCount(0);
       await page.goto("/invoices/new?kind=student");
-      await expect(page.getByLabel("Student").locator("option", { hasText: `${studentA} (Archived)` })).toHaveCount(1);
+      await expect(page.getByLabel("Student").locator("option", { hasText: `${editedStudentA} (Archived)` })).toHaveCount(1);
 
       const archivedSyncResponse = await page.context().request.get(`/api/sync?after=${archiveAfterRevision}`);
       expect(archivedSyncResponse.status()).toBe(200);
@@ -523,6 +580,10 @@ test.describe("authenticated account approval", () => {
         { entity: "lesson", id: lessonFixtures[1].id },
       ]));
 
+      await page.goto(`/students/${rowsA![0].id}`);
+      await expect(page.getByRole("link", { name: "Edit student" })).toHaveCount(0);
+      const archivedEditResponse = await page.goto(`/students/${rowsA![0].id}/edit`);
+      expect(archivedEditResponse?.status()).toBe(404);
       await page.goto(`/students/${rowsA![0].id}`);
       await page.getByRole("button", { name: "Restore student" }).click();
       await expect(page).toHaveURL(new RegExp(`/students/${rowsA![0].id}$`));
@@ -543,7 +604,7 @@ test.describe("authenticated account approval", () => {
       const restoredSync = await restoredSyncResponse.json();
       expect(restoredSync.students.some((student: { id: string }) => student.id === rowsA![0].id)).toBe(true);
       await page.goto("/calendar");
-      await expect(page.getByLabel("Student").locator("option", { hasText: studentA })).toHaveCount(1);
+      await expect(page.getByLabel("Student").locator("option", { hasText: editedStudentA })).toHaveCount(1);
 
       const databaseA = `teachnotes-user-${accountA.user_id}`;
       await expect.poll(() => page.evaluate(() => localStorage.getItem("teachnotes-active-user"))).toBe(accountA.user_id);
@@ -585,7 +646,7 @@ test.describe("authenticated account approval", () => {
       expect(databaseB).not.toBe(databaseA);
       await page.goto("/students");
       await expect(page.getByText(studentB, { exact: true })).toBeVisible();
-      await expect(page.getByText(studentA, { exact: true })).toHaveCount(0);
+      await expect(page.getByText(editedStudentA, { exact: true })).toHaveCount(0);
 
       await adminPage.goto("/admin/users");
       await adminPage.getByRole("button", { name: /^approved/i }).click();
