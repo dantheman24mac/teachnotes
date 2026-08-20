@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, BookOpenText, CalendarDays, Mail, UserRound } from "lucide-react";
+import { Archive, ArrowLeft, BookOpenText, CalendarDays, Mail, Pencil, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArchiveStudentControl, RestoreStudentControl } from "@/components/student-archive-controls";
@@ -20,7 +20,9 @@ export default async function StudentPage({ params }: { params: Promise<{ id: st
     <div className="profile-hero">
       <span className="avatar large">{student.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>
       <div><p className="eyebrow">Student profile</p><h1>{student.displayName}</h1><p>{student.guardianName || "No billing contact"}{student.billingEmail && <> · {student.billingEmail}</>}</p></div>
-      {archived && <span className="archive-badge profile-archive-badge"><Archive size={13} /> Archived {formatInWorkspaceTime(student.deletedAt!, settings.timezone, { day: "numeric", month: "short", year: "numeric" })}</span>}
+      {archived
+        ? <span className="archive-badge profile-archive-badge"><Archive size={13} /> Archived {formatInWorkspaceTime(student.deletedAt!, settings.timezone, { day: "numeric", month: "short", year: "numeric" })}</span>
+        : <Link className="button-secondary profile-action" href={`/students/${student.id}/edit`}><Pencil size={16} /> Edit student</Link>}
     </div>
     <div className="two-column">
       <div className="content-stack">
