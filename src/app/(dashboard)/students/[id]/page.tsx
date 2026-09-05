@@ -3,18 +3,23 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArchiveStudentControl, RestoreStudentControl } from "@/components/student-archive-controls";
 import { StudentDefaultsForm } from "@/components/student-defaults-form";
-import { getBusinessSettings, getLessons, getStudent } from "@/lib/data";
+import { StudentLessonHistory } from "@/components/student-lesson-history";
+import { getBusinessSettings, getLessonHistoryPage, getStudent, getUpcomingLessons } from "@/lib/data";
 import { formatZar } from "@/lib/domain";
 import { formatInWorkspaceTime } from "@/lib/timezone";
 import { StatusChip } from "@/components/status-chip";
 
 export default async function StudentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [student, lessons, settings] = await Promise.all([getStudent(id, { includeArchived: true }), getLessons({ studentId: id, limit: 50 }), getBusinessSettings()]);
+  const now = new Date().toISOString();
+  const [student, future, historyPage, settings] = await Promise.all([
+    getStudent(id, { includeArchived: true }),
+    getUpcomingLessons(id, now),
+    getLessonHistoryPage({ studentId: id, before: now }),
+    getBusinessSettings(),
+  ]);
   if (!student) notFound();
   const archived = Boolean(student.deletedAt);
-  const future = lessons.filter((lesson) => new Date(lesson.startsAt) >= new Date()).slice(0, 5);
-  const history = lessons.filter((lesson) => lesson.notes && new Date(lesson.startsAt) < new Date()).reverse().slice(0, 20);
   return <>
     <Link href={archived ? "/students?view=archived" : "/students"} className="back-link"><ArrowLeft size={16} /> Students</Link>
     <div className="profile-hero">
@@ -25,7 +30,7 @@ export default async function StudentPage({ params }: { params: Promise<{ id: st
     <div className="two-column">
       <div className="content-stack">
         <section className="section-card"><div className="section-heading"><div><h2><CalendarDays /> Upcoming lessons</h2><p>{archived ? "Only preserved records are shown." : "The next scheduled sessions."}</p></div></div>{future.length ? <div className="compact-list">{future.map((lesson) => <Link prefetch={false} href={`/lessons/${lesson.id}`} key={lesson.id}><div><strong>{formatInWorkspaceTime(lesson.startsAt, settings.timezone, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</strong><small>{lesson.durationMinutes} min · {formatZar(lesson.rateCents)}</small></div><StatusChip status={lesson.status} /></Link>)}</div> : <p className="empty-copy">No future lessons scheduled.</p>}</section>
-        <section className="section-card"><div className="section-heading"><div><h2><BookOpenText /> Previous lesson notes</h2><p>Most recent first. Older notes load from the archive when connected.</p></div></div>{history.length ? <div className="note-timeline">{history.map((lesson) => <article key={lesson.id}><time>{formatInWorkspaceTime(lesson.startsAt, settings.timezone, { day: "numeric", month: "short", year: "numeric" })}</time><div><StatusChip status={lesson.status} /><p>{lesson.notes}</p></div></article>)}</div> : <p className="empty-copy">No previous lesson notes.</p>}</section>
+        <section className="section-card"><div className="section-heading"><div><h2><BookOpenText /> Previous lesson notes</h2><p>Most recent first.</p></div></div><StudentLessonHistory initialLessons={historyPage.lessons} initialNextCursor={historyPage.nextCursor} studentId={id} timezone={settings.timezone} /></section>
       </div>
       <aside className="section-card sticky-card">
         <div className="card-icon">{archived ? <Archive /> : <UserRound />}</div>

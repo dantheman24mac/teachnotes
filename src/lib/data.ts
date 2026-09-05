@@ -176,6 +176,113 @@ export async function getLessons(options?: {
   return (data ?? []).map(mapLesson);
 }
 
+export interface LessonHistoryCursor {
+  startsAt: string;
+  id: string;
+}
+
+export interface LessonHistoryPage {
+  lessons: Lesson[];
+  nextCursor: string | null;
+}
+
+const lessonIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function encodeLessonHistoryCursor(cursor: LessonHistoryCursor) {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+export function decodeLessonHistoryCursor(value: string): LessonHistoryCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LessonHistoryCursor>;
+    if (typeof parsed.startsAt !== "string" || typeof parsed.id !== "string" || !lessonIdPattern.test(parsed.id)) return null;
+    const startsAt = new Date(parsed.startsAt);
+    if (Number.isNaN(startsAt.getTime())) return null;
+    return { startsAt: startsAt.toISOString(), id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+export async function getUpcomingLessons(studentId: string, from: string, limit = 5): Promise<Lesson[]> {
+  if (!isSupabaseConfigured()) {
+    return demoLessons
+      .filter((lesson) => lesson.studentId === studentId && lesson.startsAt >= from)
+      .sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
+      .slice(0, limit);
+  }
+  await requireApprovedUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("lessons")
+    .select("*, students(display_name)")
+    .eq("student_id", studentId)
+    .is("deleted_at", null)
+    .gte("starts_at", from)
+    .order("starts_at", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(mapLesson);
+}
+
+async function getPastLessonNotes(options: {
+  studentId: string;
+  before: LessonHistoryCursor | { startsAt: string };
+  limit: number;
+}): Promise<Lesson[]> {
+  if (!isSupabaseConfigured()) {
+    return demoLessons
+      .filter((lesson) => lesson.studentId === options.studentId && Boolean(lesson.notes))
+      .filter((lesson) => lesson.startsAt < options.before.startsAt
+        || ("id" in options.before && lesson.startsAt === options.before.startsAt && lesson.id < options.before.id))
+      .sort((left, right) => right.startsAt.localeCompare(left.startsAt) || right.id.localeCompare(left.id))
+      .slice(0, options.limit);
+  }
+  await requireApprovedUser();
+  const supabase = await createClient();
+  let query = supabase
+    .from("lessons")
+    .select("*, students(display_name)")
+    .eq("student_id", options.studentId)
+    .is("deleted_at", null)
+    .neq("notes", "")
+    .order("starts_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(options.limit);
+  if ("id" in options.before) {
+    query = query.or(`starts_at.lt.${options.before.startsAt},and(starts_at.eq.${options.before.startsAt},id.lt.${options.before.id})`);
+  } else {
+    query = query.lt("starts_at", options.before.startsAt);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map(mapLesson);
+}
+
+export async function getLessonHistoryPage(options: {
+  studentId: string;
+  before?: string;
+  cursor?: LessonHistoryCursor;
+  pageSize?: number;
+}): Promise<LessonHistoryPage> {
+  const pageSize = options.pageSize ?? 20;
+  const before = options.cursor ?? { startsAt: options.before ?? new Date().toISOString() };
+  const lessons = await getPastLessonNotes({ studentId: options.studentId, before, limit: pageSize + 1 });
+  const page = lessons.slice(0, pageSize);
+  const lastLesson = page.at(-1);
+  return {
+    lessons: page,
+    nextCursor: lessons.length > pageSize && lastLesson
+      ? encodeLessonHistoryCursor({ startsAt: lastLesson.startsAt, id: lastLesson.id })
+      : null,
+  };
+}
+
+export async function getPreviousLessonNotes(studentId: string, before: string, limit = 20) {
+  return getPastLessonNotes({ studentId, before: { startsAt: before }, limit });
+}
+
 export async function getLesson(id: string) {
   if (!isSupabaseConfigured()) return demoLessons.find((item) => item.id === id) ?? null;
   await requireApprovedUser();
