@@ -1,6 +1,11 @@
 import { endOfMonth, startOfMonth } from "date-fns";
 import { demoInvoices, demoLessons, demoSettings, demoStudents } from "./demo-data";
-import { calculateInvoiceTotal, isBillable } from "./domain";
+import {
+  calculateBillableTotal,
+  calculateInvoiceTotal,
+  getInvoiceEligibleLessons,
+  isBillable,
+} from "./domain";
 import { expandSeries } from "./recurrence";
 import { requireApprovedUser } from "./auth";
 import { createClient, isSupabaseConfigured } from "./supabase/server";
@@ -221,8 +226,8 @@ export async function getTodayDashboard() {
     todayLessons: monthLessons.filter(
       (lesson) => lesson.startsAt >= dayStart.toISOString() && lesson.startsAt < dayEnd.toISOString(),
     ),
-    monthEarnings: calculateInvoiceTotal(monthLessons),
-    completedCount: monthLessons.filter((lesson) => lesson.status !== "scheduled").length,
+    monthEarnings: calculateBillableTotal(monthLessons),
+    completedCount: monthLessons.filter((lesson) => lesson.status === "attended").length,
     billableCount: monthLessons.filter((lesson) =>
       isBillable(lesson.status, lesson.billingOverride),
     ).length,
@@ -276,8 +281,6 @@ export async function getInvoicePreview(
   const settings = settingsOverride ?? await getBusinessSettings();
   const period = getWorkspaceInvoicePeriod(month, settings.timezone);
   const lessons = await getLessons({ from: period.start.toISOString(), to: period.end.toISOString(), studentId });
-  const eligible = lessons.filter(
-    (lesson) => !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride),
-  );
+  const eligible = getInvoiceEligibleLessons(lessons);
   return { lessons: eligible, totalCents: calculateInvoiceTotal(eligible), period, settings };
 }
