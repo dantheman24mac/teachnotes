@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getBusinessSettings, getLessons } from "./data";
-import { calculateInvoiceTotal, isBillable } from "./domain";
+import { calculateBillableTotal, isBillable } from "./domain";
 import { getWorkspaceDateKey, getWorkspaceDayBounds, getWorkspaceMonthBounds } from "./timezone";
 
 export async function getTimezoneAwareTodayDashboard() {
@@ -19,8 +19,8 @@ export async function getTimezoneAwareTodayDashboard() {
       const startsAt = new Date(lesson.startsAt);
       return startsAt >= day.start && startsAt < day.end;
     }),
-    monthEarnings: calculateInvoiceTotal(monthLessons),
-    completedCount: monthLessons.filter((lesson) => lesson.status !== "scheduled").length,
+    monthEarnings: calculateBillableTotal(monthLessons),
+    completedCount: monthLessons.filter((lesson) => lesson.status === "attended").length,
     billableCount: monthLessons.filter((lesson) => isBillable(lesson.status, lesson.billingOverride)).length,
     timezone: settings.timezone,
   };

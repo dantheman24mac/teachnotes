@@ -1,5 +1,12 @@
 import type { BillingOverride, LessonStatus } from "./types";
 
+type BillableLesson = {
+  status: LessonStatus;
+  billingOverride: BillingOverride;
+  rateCents: number;
+  invoiced?: boolean;
+};
+
 export function isBillable(
   status: LessonStatus,
   override: BillingOverride = "default",
@@ -21,19 +28,25 @@ export function invoiceNumber(prefix: string, year: number, sequence: number) {
 }
 
 export function calculateInvoiceTotal(
-  lessons: Array<{
-    status: LessonStatus;
-    billingOverride: BillingOverride;
-    rateCents: number;
-    invoiced?: boolean;
-  }>,
+  lessons: BillableLesson[],
+) {
+  return calculateBillableTotal(getInvoiceEligibleLessons(lessons));
+}
+
+export function calculateBillableTotal(
+  lessons: BillableLesson[],
 ) {
   return lessons.reduce(
-    (total, lesson) =>
-      !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride)
-        ? total + lesson.rateCents
-        : total,
+    (total, lesson) => isBillable(lesson.status, lesson.billingOverride)
+      ? total + lesson.rateCents
+      : total,
     0,
+  );
+}
+
+export function getInvoiceEligibleLessons<T extends BillableLesson>(lessons: T[]): T[] {
+  return lessons.filter(
+    (lesson) => !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride),
   );
 }
 
