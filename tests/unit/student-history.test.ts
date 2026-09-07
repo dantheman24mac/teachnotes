@@ -5,7 +5,12 @@ import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Lesson } from "@/lib/types";
 
-const mocks = vi.hoisted(() => ({ lessons: [] as Lesson[] }));
+const mocks = vi.hoisted(() => ({
+  createClient: vi.fn(),
+  lessons: [] as Lesson[],
+  requireApprovedUser: vi.fn(),
+  supabaseConfigured: false,
+}));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/demo-data", () => ({
@@ -15,10 +20,10 @@ vi.mock("@/lib/demo-data", () => ({
   demoStudents: [],
 }));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(),
-  isSupabaseConfigured: () => false,
+  createClient: mocks.createClient,
+  isSupabaseConfigured: () => mocks.supabaseConfigured,
 }));
-vi.mock("@/lib/auth", () => ({ requireApprovedUser: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ requireApprovedUser: mocks.requireApprovedUser }));
 
 import { StudentLessonHistory } from "@/components/student-lesson-history";
 import {
@@ -47,7 +52,12 @@ function lesson(index: number, startsAt: string, notes = `Note ${index}`): Lesso
 }
 
 describe("student lesson history queries", () => {
-  beforeEach(() => mocks.lessons.splice(0));
+  beforeEach(() => {
+    mocks.lessons.splice(0);
+    mocks.supabaseConfigured = false;
+    mocks.createClient.mockReset();
+    mocks.requireApprovedUser.mockReset();
+  });
 
   it("finds upcoming lessons independently of more than 50 historical lessons", async () => {
     const now = new Date("2026-09-05T10:00:00.000Z");
@@ -86,7 +96,7 @@ describe("student lesson history queries", () => {
   });
 
   it("pages through duplicate timestamps without duplicates or skipped notes", async () => {
-    const duplicateTime = "2026-09-04T10:00:00.000Z";
+    const duplicateTime = "2026-09-04T10:00:00.123456+00:00";
     for (let index = 1; index <= 25; index += 1) mocks.lessons.push(lesson(index, duplicateTime));
     for (let index = 26; index <= 35; index += 1) {
       mocks.lessons.push(lesson(index, `2026-09-03T${String(35 - index).padStart(2, "0")}:00:00.000Z`));
@@ -97,12 +107,45 @@ describe("student lesson history queries", () => {
     const second = await getLessonHistoryPage({ studentId, cursor: cursor! });
     const ids = [...first.lessons, ...second.lessons].map((item) => item.id);
 
+    expect(cursor?.startsAt).toBe(duplicateTime);
     expect(first.lessons).toHaveLength(20);
     expect(second.lessons).toHaveLength(15);
     expect(new Set(ids).size).toBe(35);
     expect(ids).toEqual([...mocks.lessons].sort((left, right) =>
       right.startsAt.localeCompare(left.startsAt) || right.id.localeCompare(left.id),
     ).map((item) => item.id));
+  });
+
+  it("uses the full timestamp precision in the Supabase cursor filter", async () => {
+    const startsAt = "2026-09-04T10:00:00.123456+00:00";
+    const cursor = decodeLessonHistoryCursor(Buffer.from(JSON.stringify({
+      startsAt,
+      id: lesson(20, startsAt).id,
+    })).toString("base64url"));
+    const query = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      is: vi.fn(),
+      neq: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn(),
+      or: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.is.mockReturnValue(query);
+    query.neq.mockReturnValue(query);
+    query.order.mockReturnValue(query);
+    query.limit.mockReturnValue(query);
+    mocks.supabaseConfigured = true;
+    mocks.createClient.mockResolvedValue({ from: vi.fn(() => query) });
+    mocks.requireApprovedUser.mockResolvedValue({ user: { id: "owner" } });
+
+    await getLessonHistoryPage({ studentId, cursor: cursor! });
+
+    expect(query.or).toHaveBeenCalledWith(
+      `starts_at.lt.${startsAt},and(starts_at.eq.${startsAt},id.lt.${cursor?.id})`,
+    );
   });
 
   it("returns the latest notes strictly before a lesson", async () => {
