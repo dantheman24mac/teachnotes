@@ -1,5 +1,5 @@
 import { AuthorizationError, requireApprovedUser } from "@/lib/auth";
-import { getLessons } from "@/lib/data";
+import { decodeLessonHistoryCursor, getLessonHistoryPage, getStudent } from "@/lib/data";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 
 export async function GET(request: Request, { params }: { params: Promise<{ studentId: string }> }) {
@@ -12,8 +12,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ stud
     }
   }
   const { studentId } = await params;
-  const cursor = new URL(request.url).searchParams.get("cursor") ?? new Date().toISOString();
-  const lessons = (await getLessons({ studentId, to: cursor, limit: 21 })).filter((lesson) => lesson.notes).reverse();
-  const page = lessons.slice(0, 20);
-  return Response.json({ lessons: page, nextCursor: lessons.length > 20 ? page.at(-1)?.startsAt : null }, { headers: { "cache-control": "private, no-store" } });
+  const cursorValue = new URL(request.url).searchParams.get("cursor");
+  const cursor = cursorValue ? decodeLessonHistoryCursor(cursorValue) : undefined;
+  if (cursorValue && !cursor) return Response.json({ error: "Invalid cursor" }, { status: 400 });
+  const student = await getStudent(studentId, { includeArchived: true });
+  if (!student) return Response.json({ error: "Student not found" }, { status: 404 });
+  const page = await getLessonHistoryPage({ studentId, cursor: cursor ?? undefined });
+  return Response.json(page, { headers: { "cache-control": "private, no-store" } });
 }
