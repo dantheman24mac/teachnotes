@@ -42,11 +42,13 @@
         };
       };
       function queuePatch(db,lesson,patch,message){
-        const tx=db.transaction(["lessons","outbox"],"readwrite");
-        const updated=Object.assign({},lesson,patch);
-        tx.objectStore("lessons").put(updated);
-        tx.objectStore("outbox").put({id:crypto.randomUUID(),lessonId:lesson.id,baseVersion:lesson.version,patch,clientTimestamp:new Date().toISOString()});
-        tx.oncomplete=()=>{Object.assign(lesson,patch);message.textContent="Saved on this device. It will sync when you reconnect.";const countTx=db.transaction("outbox","readonly");const count=countTx.objectStore("outbox").count();count.onsuccess=()=>{pending.textContent=`${count.result} edit${count.result===1?"":"s"} waiting`}};
+        const tx=db.transaction(["lessons","outbox","meta"],"readwrite");
+        const lessonRequest=tx.objectStore("lessons").get(lesson.id);
+        const timestampRequest=tx.objectStore("meta").get("last-client-timestamp");
+        let lessonReady=false,timestampReady=false,updated;
+        const write=()=>{if(!lessonReady||!timestampReady)return;const current=lessonRequest.result||lesson;const previous=Date.parse(String(timestampRequest.result?.value||""));const clientTimestamp=new Date(Math.max(Date.now(),(Number.isNaN(previous)?0:previous+1))).toISOString();updated=Object.assign({},current,patch);tx.objectStore("lessons").put(updated);tx.objectStore("outbox").put({id:crypto.randomUUID(),lessonId:lesson.id,baseVersion:current.version,patch,clientTimestamp});tx.objectStore("meta").put({key:"last-client-timestamp",value:clientTimestamp})};
+        lessonRequest.onsuccess=()=>{lessonReady=true;write()};timestampRequest.onsuccess=()=>{timestampReady=true;write()};
+        tx.oncomplete=()=>{Object.assign(lesson,updated);message.textContent="Saved on this device. It will sync when you reconnect.";const countTx=db.transaction("outbox","readonly");const count=countTx.objectStore("outbox").count();count.onsuccess=()=>{pending.textContent=`${count.result} edit${count.result===1?"":"s"} waiting`}};
         tx.onerror=()=>{message.textContent="This edit could not be saved."};
       }
       function renderLesson(db,lesson){

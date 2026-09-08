@@ -1,9 +1,8 @@
 "use client";
 
-import { AlertTriangle, Check, CloudOff, RefreshCw, Wifi } from "lucide-react";
+import { CloudOff, RefreshCw, Wifi } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { flushOutbox, getConflicts, pendingCount, prepareOfflineUser, resolveConflict, setOfflineSessionMarker } from "@/lib/offline";
-import type { SyncConflict } from "@/lib/types";
+import { flushOutbox, pendingCount, prepareOfflineUser, setOfflineSessionMarker } from "@/lib/offline";
 
 interface OfflineContextValue {
   online: boolean;
@@ -32,7 +31,6 @@ export function useOffline() {
 export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = false }: { children: React.ReactNode; userId?: string; isBootstrapAdmin?: boolean }) {
   const online = useSyncExternalStore(subscribeToConnection, connectionSnapshot, serverConnectionSnapshot);
   const [pending, setPending] = useState(0);
-  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [syncing, setSyncing] = useState(false);
   const syncingRef = useRef(false);
   const [ready, setReady] = useState(false);
@@ -40,7 +38,6 @@ export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = 
   const refresh = useCallback(async () => {
     if (!ready) return;
     setPending(await pendingCount(userId));
-    setConflicts(await getConflicts(userId));
   }, [ready, userId]);
 
   const syncNow = useCallback(async () => {
@@ -85,10 +82,9 @@ export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = 
       await fetch("/offline.html", { cache: "reload", credentials: "same-origin" }).catch(() => undefined);
       await setOfflineSessionMarker(userId);
       if (navigator.onLine) await flushOutbox(userId).catch(() => undefined);
-      const [initialPending, initialConflicts] = await Promise.all([pendingCount(userId), getConflicts(userId)]);
+      const initialPending = await pendingCount(userId);
       if (!active) return;
       setPending(initialPending);
-      setConflicts(initialConflicts);
       setReady(true);
     })().catch(() => {});
     return () => { active = false; };
@@ -107,12 +103,6 @@ export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = 
     };
   }, [refresh, syncNow]);
 
-  const resolve = async (id: string, choice: "server" | "local") => {
-    await resolveConflict(userId, id, choice);
-    await refresh();
-    if (choice === "local") await syncNow();
-  };
-
   return (
     <OfflineContext.Provider value={{ online, pending, ready, userId, syncNow }}>
       {children}
@@ -121,21 +111,6 @@ export function OfflineProvider({ children, userId = "demo", isBootstrapAdmin = 
         <span>{!ready ? "Preparing…" : online ? (pending ? `${pending} waiting` : "Synced") : `${pending} offline edit${pending === 1 ? "" : "s"}`}</span>
         {syncing && <RefreshCw size={14} className="spin" />}
       </button>
-      {conflicts.length > 0 && (
-        <aside className="conflict-panel" role="alert" aria-live="polite">
-          <div className="conflict-title"><AlertTriangle size={18} /> Sync decision needed</div>
-          <p>This lesson changed elsewhere while you were offline. Your version is preserved.</p>
-          {conflicts.map((conflict) => (
-            <div className="conflict-item" key={conflict.operation.id}>
-              <strong>{conflict.serverLesson.studentName}</strong>
-              <div className="conflict-actions">
-                <button onClick={() => void resolve(conflict.operation.id, "server")} type="button">Use server</button>
-                <button className="primary-small" onClick={() => void resolve(conflict.operation.id, "local")} type="button"><Check size={14} /> Keep mine</button>
-              </div>
-            </div>
-          ))}
-        </aside>
-      )}
     </OfflineContext.Provider>
   );
 }

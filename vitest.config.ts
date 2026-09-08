@@ -4,7 +4,7 @@ import path from "node:path";
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   test: {
-    include: ["tests/unit/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.{ts,tsx}"],
     environment: "node",
     coverage: { provider: "v8", reporter: ["text", "html"], include: ["src/lib/domain.ts", "src/lib/recurrence.ts"] },
   },
