@@ -16,9 +16,90 @@ export interface RecurrenceInput {
   timezone: string;
   frequency: "weekly" | "fortnightly";
   weekdays: number[];
+  weekStartsOn?: number;
   until?: string | null;
   exclusions?: string[];
   horizon?: Date;
+}
+
+export interface SeriesReplacement {
+  startsAtLocal: string;
+  timezone: string;
+  frequency: "weekly" | "fortnightly";
+  weekdays: number[];
+  weekStartsOn: number;
+  until: string | null;
+  exclusions: string[];
+  occurrences: Array<{ sourceKey: string; startsAt: string }>;
+}
+
+const localTimestampPattern = "yyyy-MM-dd'T'HH:mm:ss";
+
+function localMilliseconds(value: string) {
+  return Date.parse(`${value.replace(" ", "T").slice(0, 19)}Z`);
+}
+
+function shiftLocalTimestamp(value: string, milliseconds: number) {
+  return new Date(localMilliseconds(value) + milliseconds).toISOString().slice(0, 19);
+}
+
+export function buildSeriesReplacement(
+  series: RecurrenceInput,
+  currentStartsAt: Date,
+  nextStartsAtLocal: string,
+  cutoff: Date,
+  horizon: Date,
+  timezone = series.timezone,
+): SeriesReplacement {
+  const currentLocal = formatInTimeZone(currentStartsAt, timezone, localTimestampPattern);
+  const normalizedNext = nextStartsAtLocal.replace(" ", "T").slice(0, 19);
+  const selectedTarget = fromZonedTime(normalizedNext, timezone);
+  const replacementHorizon = selectedTarget > horizon ? selectedTarget : horizon;
+  const localDelta = localMilliseconds(normalizedNext) - localMilliseconds(currentLocal);
+  const shiftedStart = shiftLocalTimestamp(series.startsAtLocal, localDelta);
+  const originalStartDate = series.startsAtLocal.replace(" ", "T").slice(0, 10);
+  const shiftedStartDate = shiftedStart.slice(0, 10);
+  const dayDelta = Math.round(
+    (Date.parse(`${shiftedStartDate}T12:00:00Z`) - Date.parse(`${originalStartDate}T12:00:00Z`)) /
+      (24 * 60 * 60 * 1000),
+  );
+  const until = series.until ?? null;
+  const exclusions = series.exclusions ?? [];
+  const shiftedWeekdays = series.weekdays.map((weekday) => (weekday + dayDelta % 7 + 7) % 7);
+  const shiftedWeekStartsOn = ((series.weekStartsOn ?? 1) + dayDelta % 7 + 7) % 7;
+  const sourceHorizon = new Date(Math.max(
+    replacementHorizon.getTime() - localDelta + 14 * 24 * 60 * 60 * 1000,
+    currentStartsAt.getTime() + 14 * 24 * 60 * 60 * 1000,
+  ));
+  const source = expandSeries({ ...series, exclusions: [], horizon: sourceHorizon });
+  const replacement = expandSeries({
+    startsAtLocal: shiftedStart,
+    timezone,
+    frequency: series.frequency,
+    weekdays: shiftedWeekdays,
+    weekStartsOn: shiftedWeekStartsOn,
+    until,
+    exclusions,
+    horizon: replacementHorizon,
+  });
+
+  const replacementKeys = new Set(replacement.map((date) => date.toISOString()));
+  return {
+    startsAtLocal: shiftedStart,
+    timezone,
+    frequency: series.frequency,
+    weekdays: shiftedWeekdays,
+    weekStartsOn: shiftedWeekStartsOn,
+    until,
+    exclusions,
+    occurrences: source.flatMap((sourceDate) => {
+      const sourceLocal = formatInTimeZone(sourceDate, timezone, localTimestampPattern);
+      const startsAt = fromZonedTime(shiftLocalTimestamp(sourceLocal, localDelta), timezone);
+      return sourceDate >= cutoff && startsAt <= replacementHorizon && replacementKeys.has(startsAt.toISOString())
+        ? [{ sourceKey: sourceDate.toISOString(), startsAt: startsAt.toISOString() }]
+        : [];
+    }),
+  };
 }
 
 export function expandSeries(input: RecurrenceInput): Date[] {
@@ -41,10 +122,17 @@ export function expandSeries(input: RecurrenceInput): Date[] {
     dtstart: start,
     until,
     byweekday: input.weekdays.map((day) => weekdayMap[day]),
+    wkst: weekdayMap[input.weekStartsOn ?? 1],
   });
 
   return rule
     .all()
-    .map((date) => fromZonedTime(date.toISOString().slice(0, 19), input.timezone))
+    .flatMap((date) => {
+      const expectedLocal = date.toISOString().slice(0, 19);
+      const occurrence = fromZonedTime(expectedLocal, input.timezone);
+      return formatInTimeZone(occurrence, input.timezone, localTimestampPattern) === expectedLocal
+        ? [occurrence]
+        : [];
+    })
     .filter((date) => !excluded.has(formatInTimeZone(date, input.timezone, "yyyy-MM-dd")));
 }
