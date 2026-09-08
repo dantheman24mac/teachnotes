@@ -138,7 +138,7 @@ export async function rescheduleLesson(formData: FormData) {
   if (scope === "one" || !current.series_id) {
     const { error: updateError } = await supabase
       .from("lessons")
-      .update({ starts_at: next.toISOString(), status: "scheduled" })
+      .update({ starts_at: next.toISOString(), status: "scheduled", status_saved_at: new Date().toISOString(), status_saved_by: "ffffffff-ffff-ffff-ffff-ffffffffffff" })
       .eq("id", lessonId)
       .is("invoiced_at", null)
       .is("deleted_at", null);
