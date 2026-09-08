@@ -25,27 +25,32 @@ export async function signOut() {
   redirect("/login");
 }
 
-const studentSchema = z.object({
-  displayName: z.string().trim().min(2),
+const studentProfileSchema = z.object({
+  displayName: z.string().trim().min(2).max(200),
   guardianName: z.string().trim().optional(),
   billingEmail: z.string().trim().email().or(z.literal("")),
   billingAddress: z.string().trim().optional(),
+});
+
+const studentSchema = studentProfileSchema.extend({
   defaultDurationMinutes: z.coerce.number().int().min(15).max(240),
   defaultRateRand: z.coerce.number().min(0),
 });
 
 export type StudentArchiveState = { message: string };
+export type StudentProfileState = { message: string };
 export type StudentDefaultsState = {
   status: "idle" | "success" | "error";
   message: string;
 };
 
-function revalidateStudentArchivePaths(studentId: string) {
+function revalidateStudentPaths(studentId: string) {
   revalidatePath("/students");
   revalidatePath(`/students/${studentId}`);
   revalidatePath("/today");
   revalidatePath("/calendar");
   revalidatePath("/invoices/new");
+  revalidatePath("/lessons/[id]", "page");
 }
 
 export async function createStudent(formData: FormData) {
@@ -66,6 +71,32 @@ export async function createStudent(formData: FormData) {
   revalidatePath("/students");
 }
 
+export async function updateStudent(_previousState: StudentProfileState, formData: FormData): Promise<StudentProfileState> {
+  if (!isSupabaseConfigured()) return { message: "Student details cannot be changed in the portfolio demo." };
+  const parsed = studentProfileSchema.extend({ studentId: z.string().uuid() }).safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { message: "Enter a student name between 2 and 200 characters and a valid billing email." };
+  const user = await requireUser();
+  const { studentId, displayName, guardianName, billingEmail, billingAddress } = parsed.data;
+  const supabase = await createClient();
+  const { data: updatedStudent, error } = await supabase
+    .from("students")
+    .update({
+      display_name: displayName,
+      guardian_name: guardianName || null,
+      billing_email: billingEmail || null,
+      billing_address: billingAddress || null,
+    })
+    .eq("id", studentId)
+    .eq("owner_id", user.id)
+    .eq("active", true)
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error || !updatedStudent) return { message: "We couldn’t save these student details. Nothing was changed." };
+  revalidateStudentPaths(studentId);
+  redirect(`/students/${studentId}`);
+}
+
 export async function archiveStudent(_previousState: StudentArchiveState, formData: FormData): Promise<StudentArchiveState> {
   if (!isSupabaseConfigured()) return { message: "Student archiving is unavailable in the portfolio demo." };
   const parsed = z.string().uuid().safeParse(formData.get("studentId"));
@@ -74,7 +105,7 @@ export async function archiveStudent(_previousState: StudentArchiveState, formDa
   const supabase = await createClient();
   const { error } = await supabase.rpc("archive_student", { p_student_id: parsed.data });
   if (error) return { message: "We couldn’t archive this student. Nothing was changed." };
-  revalidateStudentArchivePaths(parsed.data);
+  revalidateStudentPaths(parsed.data);
   redirect("/students?view=archived");
 }
 
@@ -86,7 +117,7 @@ export async function restoreStudent(_previousState: StudentArchiveState, formDa
   const supabase = await createClient();
   const { error } = await supabase.rpc("restore_student", { p_student_id: parsed.data });
   if (error) return { message: "We couldn’t restore this student. Nothing was changed." };
-  revalidateStudentArchivePaths(parsed.data);
+  revalidateStudentPaths(parsed.data);
   redirect(`/students/${parsed.data}`);
 }
 
@@ -207,12 +238,7 @@ export async function updateStudentDefaults(_previousState: StudentDefaultsState
       .gt("starts_at", new Date().toISOString());
     if (futureError) return { status: "error", message: "The student defaults were saved, but future lessons could not be updated." };
   }
-  revalidatePath("/students");
-  revalidatePath(`/students/${studentId}`);
-  revalidatePath("/calendar");
-  revalidatePath("/today");
-  revalidatePath("/invoices/new");
-  revalidatePath("/lessons/[id]", "page");
+  revalidateStudentPaths(studentId);
   return { status: "success", message: applyFuture ? "Defaults and future scheduled lessons saved." : "Lesson defaults saved." };
 }
 
