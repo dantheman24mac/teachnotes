@@ -1,11 +1,11 @@
 "use server";
 
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/auth";
 import { getBusinessSettings, getStudent } from "@/lib/data";
-import { expandSeries } from "@/lib/recurrence";
+import { buildSeriesReplacement, expandSeries } from "@/lib/recurrence";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 async function requireUser() {
@@ -91,7 +91,7 @@ export async function rescheduleLesson(formData: FormData) {
   const supabase = await createClient();
   const { data: current, error } = await supabase
     .from("lessons")
-    .select("id, series_id, starts_at")
+    .select("id, series_id, starts_at, occurrence_key")
     .eq("id", lessonId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -105,37 +105,65 @@ export async function rescheduleLesson(formData: FormData) {
 
   const next = fromZonedTime(nextLocal, settings.timezone);
   if (scope === "one" || !current.series_id) {
-    const { error: updateError } = await supabase
-      .from("lessons")
-      .update({ starts_at: next.toISOString(), status: "scheduled", status_saved_at: new Date().toISOString(), status_saved_by: "ffffffff-ffff-ffff-ffff-ffffffffffff" })
-      .eq("id", lessonId)
-      .is("invoiced_at", null)
-      .is("deleted_at", null);
+    const { error: updateError } = await supabase.rpc("reschedule_lesson_series", {
+      p_lesson_id: lessonId,
+      p_scope: "one",
+      p_next_starts_at: next.toISOString(),
+    });
     if (updateError) throw updateError;
   } else {
-    const threshold = scope === "following" ? current.starts_at : new Date().toISOString();
-    const delta = next.getTime() - new Date(current.starts_at).getTime();
-    const { data: future, error: futureError } = await supabase
-      .from("lessons")
-      .select("id, starts_at")
-      .eq("series_id", current.series_id)
-      .eq("status", "scheduled")
-      .is("invoiced_at", null)
+    const { data: series, error: seriesError } = await supabase
+      .from("lesson_series")
+      .select("starts_at_local, timezone, frequency, weekdays, week_starts_on, until, exclusions")
+      .eq("id", current.series_id)
+      .eq("active", true)
       .is("deleted_at", null)
-      .gte("starts_at", threshold)
-      .order("starts_at");
-    if (futureError) throw futureError;
+      .single();
+    if (seriesError) throw seriesError;
 
-    const results = await Promise.all(
-      (future ?? []).map((item) =>
-        supabase
-          .from("lessons")
-          .update({ starts_at: new Date(new Date(item.starts_at).getTime() + delta).toISOString() })
-          .eq("id", item.id)
-          .is("deleted_at", null),
-      ),
+    const sourceTime = new Date(current.occurrence_key ?? current.starts_at);
+    const now = new Date();
+    const cutoff = scope === "following" ? sourceTime : now;
+    const expansionCutoff = sourceTime < cutoff ? sourceTime : cutoff;
+    const horizon = new Date(now);
+    horizon.setFullYear(horizon.getFullYear() + 1);
+    const nextInSeriesTimezone = formatInTimeZone(next, series.timezone, "yyyy-MM-dd'T'HH:mm:ss");
+    const replacement = buildSeriesReplacement(
+      {
+        startsAtLocal: series.starts_at_local,
+        timezone: series.timezone,
+        frequency: series.frequency,
+        weekdays: series.weekdays,
+        weekStartsOn: series.week_starts_on,
+        until: series.until,
+        exclusions: series.exclusions ?? [],
+      },
+      sourceTime,
+      nextInSeriesTimezone,
+      expansionCutoff,
+      horizon,
     );
-    const updateError = results.find((result) => result.error)?.error;
+    const occurrences = replacement.occurrences.filter((item) => new Date(item.startsAt) >= now);
+    const selectedOccurrence = occurrences.find((item) => item.sourceKey === sourceTime.toISOString());
+    if (!selectedOccurrence || selectedOccurrence.startsAt !== next.toISOString()) {
+      throw new Error("The selected lesson does not fit the replacement schedule");
+    }
+    const materializeFrom = occurrences[0].startsAt;
+    const { error: updateError } = await supabase.rpc("reschedule_lesson_series", {
+      p_lesson_id: lessonId,
+      p_scope: scope,
+      p_next_starts_at: next.toISOString(),
+      p_cutoff: cutoff.toISOString(),
+      p_materialize_from: materializeFrom,
+      p_new_starts_at_local: replacement.startsAtLocal,
+      p_new_timezone: replacement.timezone,
+      p_new_frequency: replacement.frequency,
+      p_new_weekdays: replacement.weekdays,
+      p_new_week_starts_on: replacement.weekStartsOn,
+      p_new_until: replacement.until,
+      p_new_exclusions: replacement.exclusions,
+      p_occurrences: occurrences,
+    });
     if (updateError) throw updateError;
   }
 

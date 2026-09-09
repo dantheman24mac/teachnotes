@@ -346,15 +346,26 @@ export async function getTodayDashboard() {
 
 export async function ensureSeriesHorizon() {
   if (!isSupabaseConfigured()) return;
-  const { user } = await requireApprovedUser();
+  await requireApprovedUser();
   const supabase = await createClient();
-  const { data: seriesRows } = await supabase.from("lesson_series").select("*, students(default_duration_minutes, default_rate_cents)").eq("active", true).is("deleted_at", null);
+  const { data: seriesRows, error: seriesError } = await supabase
+    .from("lesson_series")
+    .select("*")
+    .eq("active", true)
+    .is("deleted_at", null);
+  if (seriesError) throw seriesError;
   for (const series of seriesRows ?? []) {
     const horizon = new Date(); horizon.setFullYear(horizon.getFullYear() + 1);
-    const occurrences = expandSeries({ startsAtLocal: series.starts_at_local, timezone: series.timezone, frequency: series.frequency, weekdays: series.weekdays, until: series.until, exclusions: series.exclusions ?? [], horizon });
-    const student = series.students as { default_duration_minutes: number; default_rate_cents: number };
-    const rows = occurrences.map((date) => ({ owner_id: user.id, student_id: series.student_id, series_id: series.id, occurrence_key: date.toISOString(), starts_at: date.toISOString(), duration_minutes: student.default_duration_minutes, rate_cents: student.default_rate_cents }));
-    for (let offset = 0; offset < rows.length; offset += 500) await supabase.from("lessons").upsert(rows.slice(offset, offset + 500), { onConflict: "series_id,occurrence_key", ignoreDuplicates: true });
+    const materializeFrom = series.materialize_from ? new Date(series.materialize_from) : null;
+    const occurrences = expandSeries({ startsAtLocal: series.starts_at_local, timezone: series.timezone, frequency: series.frequency, weekdays: series.weekdays, weekStartsOn: series.week_starts_on, until: series.until, exclusions: series.exclusions ?? [], horizon })
+      .filter((date) => !materializeFrom || date >= materializeFrom)
+      .map((date) => date.toISOString());
+    const { error } = await supabase.rpc("materialize_lesson_series", {
+      p_series_id: series.id,
+      p_schedule_revision: series.schedule_revision,
+      p_occurrences: occurrences,
+    });
+    if (error) throw error;
   }
 }
 
