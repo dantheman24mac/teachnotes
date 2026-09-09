@@ -1,6 +1,5 @@
 "use server";
 
-import { addDays } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -297,34 +296,26 @@ export async function finalizeInvoice(formData: FormData) {
   const kind = z.enum(["consolidated", "student"]).parse(formData.get("kind"));
   const studentIdValue = String(formData.get("studentId") ?? "");
   const studentId = kind === "student" ? z.string().uuid().parse(studentIdValue) : undefined;
-  const settings = await getBusinessSettings();
-  const { lessons, totalCents, period } = await getInvoicePreview(month, studentId, settings);
-  if (!lessons.length) throw new Error("There are no uninvoiced billable lessons in this selection");
-  const student = studentId ? await getStudent(studentId, { includeArchived: true }) : null;
-  const recipient = kind === "consolidated" ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress } : { name: student?.guardianName || student?.displayName || "Client", email: student?.billingEmail || "", address: student?.billingAddress || "" };
   const supabase = await createClient();
-  const { data: number, error: numberError } = await supabase.rpc("next_invoice_number", { p_prefix: settings.invoicePrefix });
-  if (numberError) throw numberError;
-  const dueAt = addDays(new Date(), settings.paymentTermsDays);
-  const { data: invoiceRow, error } = await supabase.from("invoices").insert({ owner_id: user.id, number, kind, status: "finalized", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents, issued_at: new Date().toISOString(), due_at: dueAt.toISOString() }).select("id").single();
+  const { data, error } = await supabase.rpc("finalize_invoice", {
+    p_month: month,
+    p_kind: kind,
+    p_student_id: studentId ?? null,
+  });
   if (error) throw error;
-  const lines = lessons.map((lesson) => ({ invoice_id: invoiceRow.id, lesson_id: lesson.id, student_name: lesson.studentName, lesson_date: lesson.startsAt, duration_minutes: lesson.durationMinutes, lesson_status: lesson.status, amount_cents: lesson.rateCents }));
-  const { error: lineError } = await supabase.from("invoice_lines").insert(lines);
-  if (lineError) { await supabase.from("invoices").delete().eq("id", invoiceRow.id); throw lineError; }
-  const { error: lessonUpdateError } = await supabase.from("lessons").update({ invoiced_at: new Date().toISOString() }).in("id", lessons.map((lesson) => lesson.id));
-  if (lessonUpdateError) { await supabase.from("invoices").delete().eq("id", invoiceRow.id); throw lessonUpdateError; }
-  const invoice = await getInvoice(invoiceRow.id) as Invoice;
+  const invoiceId = z.string().uuid().parse(data);
   let artifactFailed = false;
   try {
+    const invoice = await getInvoice(invoiceId) as Invoice;
     if (!invoice) throw new Error("Finalized invoice could not be reloaded");
     await storeInvoiceArtifacts(user.id, invoice);
   } catch (artifactError) {
     artifactFailed = true;
-    console.error("Invoice artifact generation failed", { invoiceId: invoiceRow.id, artifactError });
+    console.error("Invoice artifact generation failed", { invoiceId, artifactError });
   }
   revalidatePath("/invoices");
-  revalidatePath(`/invoices/${invoiceRow.id}`);
-  redirect(`/invoices/${invoiceRow.id}${artifactFailed ? "?artifact=failed" : ""}`);
+  revalidatePath(`/invoices/${invoiceId}`);
+  redirect(`/invoices/${invoiceId}${artifactFailed ? "?artifact=failed" : ""}`);
 }
 
 export async function saveDraftInvoice(formData: FormData) {
@@ -341,7 +332,7 @@ export async function saveDraftInvoice(formData: FormData) {
   ]);
   const recipient = kind === "consolidated"
     ? { name: settings.defaultPayerName, email: settings.defaultPayerEmail, address: settings.defaultPayerAddress }
-    : { name: student?.guardianName || student?.displayName || "Client", email: student?.billingEmail || "", address: student?.billingAddress || "" };
+    : { name: student?.guardianName || student?.displayName || "", email: student?.billingEmail || "", address: student?.billingAddress || "" };
   const supabase = await createClient();
   const { data, error } = await supabase.from("invoices").insert({ owner_id: user.id, kind, status: "draft", document_format: "spreadsheet_v1", student_id: studentId ?? null, period_start: period.start.toISOString(), period_end: period.end.toISOString(), tutor_snapshot: settings, recipient_snapshot: recipient, total_cents: totalCents }).select("id").single();
   if (error) throw error;
@@ -373,11 +364,8 @@ export async function voidInvoice(formData: FormData) {
   const id = z.string().uuid().parse(formData.get("invoiceId"));
   const reason = z.string().trim().min(3).parse(formData.get("reason"));
   const supabase = await createClient();
-  const { data: lines } = await supabase.from("invoice_lines").select("lesson_id").eq("invoice_id", id).is("released_at", null);
-  const { error } = await supabase.from("invoices").update({ status: "void", void_reason: reason, voided_at: new Date().toISOString() }).eq("id", id).eq("status", "finalized");
+  const { error } = await supabase.rpc("void_invoice", { p_invoice_id: id, p_reason: reason });
   if (error) throw error;
-  await supabase.from("invoice_lines").update({ released_at: new Date().toISOString() }).eq("invoice_id", id);
-  if (lines?.length) await supabase.from("lessons").update({ invoiced_at: null }).in("id", lines.map((line) => line.lesson_id));
   revalidatePath(`/invoices/${id}`);
   revalidatePath("/invoices");
 }
