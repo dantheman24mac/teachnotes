@@ -46,20 +46,35 @@ function mapLesson(row: Record<string, unknown>): Lesson {
   };
 }
 
+const blankBusinessSettings: BusinessSettings = {
+  tutorName: "",
+  tutorEmail: "",
+  tutorPhone: "",
+  tutorAddress: "",
+  defaultPayerName: "",
+  defaultPayerEmail: "",
+  defaultPayerAddress: "",
+  paymentTermsDays: 7,
+  bankDetails: "",
+  invoicePrefix: "INV",
+  timezone: "Africa/Johannesburg",
+  currency: "ZAR",
+};
+
 function mapTutorSnapshot(value: unknown): BusinessSettings {
   const snapshot = (value && typeof value === "object" ? value : {}) as Partial<BusinessSettings>;
   return {
-    tutorName: String(snapshot.tutorName ?? demoSettings.tutorName),
-    tutorEmail: String(snapshot.tutorEmail ?? demoSettings.tutorEmail),
-    tutorPhone: String(snapshot.tutorPhone ?? demoSettings.tutorPhone),
-    tutorAddress: String(snapshot.tutorAddress ?? demoSettings.tutorAddress),
-    defaultPayerName: String(snapshot.defaultPayerName ?? demoSettings.defaultPayerName),
-    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? demoSettings.defaultPayerEmail),
-    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? demoSettings.defaultPayerAddress),
-    paymentTermsDays: Number(snapshot.paymentTermsDays ?? demoSettings.paymentTermsDays),
-    bankDetails: String(snapshot.bankDetails ?? demoSettings.bankDetails),
-    invoicePrefix: String(snapshot.invoicePrefix ?? demoSettings.invoicePrefix),
-    timezone: String(snapshot.timezone ?? demoSettings.timezone),
+    tutorName: String(snapshot.tutorName ?? blankBusinessSettings.tutorName),
+    tutorEmail: String(snapshot.tutorEmail ?? blankBusinessSettings.tutorEmail),
+    tutorPhone: String(snapshot.tutorPhone ?? blankBusinessSettings.tutorPhone),
+    tutorAddress: String(snapshot.tutorAddress ?? blankBusinessSettings.tutorAddress),
+    defaultPayerName: String(snapshot.defaultPayerName ?? blankBusinessSettings.defaultPayerName),
+    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? blankBusinessSettings.defaultPayerEmail),
+    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? blankBusinessSettings.defaultPayerAddress),
+    paymentTermsDays: Number(snapshot.paymentTermsDays ?? blankBusinessSettings.paymentTermsDays),
+    bankDetails: String(snapshot.bankDetails ?? blankBusinessSettings.bankDetails),
+    invoicePrefix: String(snapshot.invoicePrefix ?? blankBusinessSettings.invoicePrefix),
+    timezone: String(snapshot.timezone ?? blankBusinessSettings.timezone),
     currency: "ZAR",
   };
 }
@@ -304,8 +319,9 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
   if (!isSupabaseConfigured()) return demoSettings;
   const { user } = await requireApprovedUser();
   const supabase = await createClient();
-  const { data } = await supabase.from("business_settings").select("*").eq("owner_id", user.id).maybeSingle();
-  if (!data) return { ...demoSettings, tutorEmail: user.email ?? "" };
+  const { data, error } = await supabase.from("business_settings").select("*").eq("owner_id", user.id).maybeSingle();
+  if (error) throw error;
+  if (!data) return { ...blankBusinessSettings };
   return {
     tutorName: data.tutor_name ?? "",
     tutorEmail: data.tutor_email ?? user.email ?? "",
