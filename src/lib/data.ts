@@ -1,10 +1,7 @@
-import { endOfMonth, startOfMonth } from "date-fns";
 import { demoInvoices, demoLessons, demoSettings, demoStudents } from "./demo-data";
 import {
-  calculateBillableTotal,
   calculateInvoiceTotal,
   getInvoiceEligibleLessons,
-  isBillable,
 } from "./domain";
 import { expandSeries } from "./recurrence";
 import { requireApprovedUser } from "./auth";
@@ -335,28 +332,6 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
     invoicePrefix: data.invoice_prefix ?? "INV",
     timezone: data.timezone ?? "Africa/Johannesburg",
     currency: "ZAR",
-  };
-}
-
-export async function getTodayDashboard() {
-  const now = new Date();
-  const dayStart = new Date(now);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-  const monthLessons = await getLessons({
-    from: startOfMonth(now).toISOString(),
-    to: endOfMonth(now).toISOString(),
-  });
-  return {
-    todayLessons: monthLessons.filter(
-      (lesson) => lesson.startsAt >= dayStart.toISOString() && lesson.startsAt < dayEnd.toISOString(),
-    ),
-    monthEarnings: calculateBillableTotal(monthLessons),
-    completedCount: monthLessons.filter((lesson) => lesson.status === "attended").length,
-    billableCount: monthLessons.filter((lesson) =>
-      isBillable(lesson.status, lesson.billingOverride),
-    ).length,
   };
 }
 

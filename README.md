@@ -93,6 +93,8 @@ flowchart LR
 - Money is stored in integer cents and each lesson snapshots a fixed amount. Duration changes never prorate the amount automatically.
 - A partial unique database index prevents one lesson from appearing in two active finalized invoices.
 
+See [Workflow reliability handoff](docs/workflow-reliability.md) for the current behavior, migration order, validation commands and release limits.
+
 ## Security design
 
 - Production secrets remain in mode-`600` files on the Pi and are never Docker build arguments or `NEXT_PUBLIC_*` values.
