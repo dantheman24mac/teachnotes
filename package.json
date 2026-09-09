@@ -29,19 +29,20 @@
     "exceljs": "4.4.0",
     "idb": "^8.0.3",
     "lucide-react": "^1.28.0",
-    "next": "16.2.12",
+    "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "rrule": "^2.8.1",
     "zod": "^4.4.3"
   },
   "overrides": {
+    "baseline-browser-mapping": "2.11.0",
     "exceljs": {
       "uuid": "11.1.1"
     },
     "nanoid": "3.3.18",
     "postcss": "8.5.23",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -54,7 +55,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.12",
+    "eslint-config-next": "16.3.4",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
     "supabase": "^2.110.0",
