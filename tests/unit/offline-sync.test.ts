@@ -109,6 +109,78 @@ describe("offline lesson sync", () => {
     expect(await pendingCount(user)).toBe(0);
   });
 
+  it("rejects a partial acknowledgement without changing the pending batch or caches", async () => {
+    const user = userId();
+    const initial = lesson();
+    await prepareOfflineUser(user, false);
+    await cacheLessons(user, [initial]);
+    await queueLessonPatch(user, initial, { status: "attended" });
+    const optimistic = await queueLessonPatch(user, initial, { notes: "Keep both edits" });
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const operations = (JSON.parse(String(init?.body)) as { operations: SyncOperation[] }).operations;
+      requestCount += 1;
+      const acknowledged = requestCount === 1 ? operations.slice(0, 1) : operations;
+      let serverLesson = initial;
+      return Response.json({
+        applied: acknowledged.map((operation) => {
+          serverLesson = { ...serverLesson, ...operation.patch, version: serverLesson.version + 1, syncRevision: serverLesson.syncRevision + 1 };
+          return { operationId: operation.id, lesson: serverLesson };
+        }),
+        conflicts: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(flushOutbox(user)).rejects.toThrow("Sync response did not match requested operations");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await pendingCount(user)).toBe(2);
+    expect(await getCachedLesson(user, initial.id)).toEqual(optimistic);
+    const db = await openDB(offlineDatabaseName(user));
+    expect(await db.get("serverLessons", initial.id)).toEqual(initial);
+
+    await flushOutbox(user);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await pendingCount(user)).toBe(0);
+    expect(await getCachedLesson(user, initial.id)).toMatchObject({ status: "attended", notes: "Keep both edits", version: 3, syncRevision: 3 });
+    db.close();
+  });
+
+  it("rejects an acknowledgement for an edit queued while the request is in flight", async () => {
+    const user = userId();
+    const initial = lesson();
+    await prepareOfflineUser(user, false);
+    await cacheLessons(user, [initial]);
+    const first = await queueLessonPatch(user, initial, { status: "attended" });
+    let finishRequest!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => { finishRequest = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const flushing = flushOutbox(user);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const optimistic = await queueLessonPatch(user, first, { notes: "Queued during sync" });
+    const requested = (JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { operations: SyncOperation[] }).operations[0];
+    const db = await openDB(offlineDatabaseName(user));
+    const pending = (await db.getAll("outbox")) as SyncOperation[];
+    const unsent = pending.find((operation) => operation.id !== requested.id)!;
+    finishRequest(Response.json({
+      applied: [
+        { operationId: requested.id, lesson: lesson({ id: initial.id, status: "attended", version: 2, syncRevision: 2 }) },
+        { operationId: unsent.id, lesson: lesson({ id: initial.id, status: "attended", notes: "Queued during sync", version: 3, syncRevision: 3 }) },
+      ],
+      conflicts: [],
+    }));
+
+    await expect(flushing).rejects.toThrow("Sync response did not match requested operations");
+    expect(await pendingCount(user)).toBe(2);
+    expect(await getCachedLesson(user, initial.id)).toEqual(optimistic);
+    expect(await db.get("serverLessons", initial.id)).toEqual(initial);
+    db.close();
+  });
+
   it("does not let stale page data overwrite pending edits after reload", async () => {
     const user = userId();
     const initial = lesson();
