@@ -116,6 +116,18 @@ describe("student lesson history queries", () => {
     ).map((item) => item.id));
   });
 
+  it("bounds cursor input without rejecting full-precision timestamps with offsets", () => {
+    const cursor = {
+      startsAt: "2026-09-04T23:59:59.123456+14:00",
+      id: "ffffffff-ffff-4fff-bfff-ffffffffffff",
+    };
+    const encoded = Buffer.from(JSON.stringify(cursor)).toString("base64url");
+    const oversized = Buffer.from(`${JSON.stringify(cursor)}${" ".repeat(256)}`).toString("base64url");
+
+    expect(decodeLessonHistoryCursor(encoded)).toEqual(cursor);
+    expect(decodeLessonHistoryCursor(oversized)).toBeNull();
+  });
+
   it("uses the full timestamp precision in the Supabase cursor filter", async () => {
     const startsAt = "2026-09-04T10:00:00.123456+00:00";
     const cursor = decodeLessonHistoryCursor(Buffer.from(JSON.stringify({

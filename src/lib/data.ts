@@ -200,12 +200,14 @@ export interface LessonHistoryPage {
 
 const lessonIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const lessonCursorTimestampPattern = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+const lessonHistoryCursorMaxLength = 256;
 
 export function encodeLessonHistoryCursor(cursor: LessonHistoryCursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
 export function decodeLessonHistoryCursor(value: string): LessonHistoryCursor | null {
+  if (value.length > lessonHistoryCursorMaxLength) return null;
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LessonHistoryCursor>;
     if (typeof parsed.startsAt !== "string"
