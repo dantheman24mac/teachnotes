@@ -197,7 +197,9 @@ export async function flushOutbox(userId: string) {
     const result = (await response.json()) as { applied: Array<{ operationId: string; lesson: Lesson }>; conflicts: SyncConflict[] };
     const completed = new Set(result.applied.map((item) => item.operationId));
     for (const conflict of result.conflicts) completed.add(conflict.operation.id);
-    if (!operations.some((operation) => completed.has(operation.id))) throw new Error("Sync returned no matching operations");
+    if (completed.size !== operations.length || operations.some((operation) => !completed.has(operation.id))) {
+      throw new Error("Sync response did not match requested operations");
+    }
 
     const tx = db.transaction(["lessons", "serverLessons", "outbox", "conflicts"], "readwrite");
     for (const item of result.applied) await tx.objectStore("outbox").delete(item.operationId);
