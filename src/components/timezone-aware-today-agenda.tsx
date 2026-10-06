@@ -2,7 +2,7 @@
 
 import { Check, ChevronRight, Clock3, FileText, MoreHorizontal, UserRoundCheck, UserRoundX } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cacheLessons, getCachedLessons, queueLessonPatch } from "@/lib/offline";
 import { formatZar, STATUS_LABELS } from "@/lib/domain";
 import { formatInWorkspaceTime, getWorkspaceDateKey } from "@/lib/timezone";
@@ -20,27 +20,45 @@ type Props = {
   timezone: string;
 };
 
+export function visibleTodayLessons(cached: Lesson[], initialLessons: Lesson[], online: boolean, timezone: string, now = new Date()) {
+  const today = getWorkspaceDateKey(now, timezone);
+  const onlineLessonIds = new Set(initialLessons.map((lesson) => lesson.id));
+  return cached.filter((lesson) => getWorkspaceDateKey(lesson.startsAt, timezone) === today && (!online || onlineLessonIds.has(lesson.id)));
+}
+
 export function TimezoneAwareTodayAgenda({ initialLessons, monthEarnings, completedCount, billableCount, timezone }: Props) {
   const [lessons, setLessons] = useState(initialLessons);
   const [editing, setEditing] = useState<string | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const { online, ready, syncNow, userId } = useOffline();
+
+  const loadCachedLessons = useCallback(async () => {
+    const cached = await getCachedLessons(userId);
+    setLessons(visibleTodayLessons(cached, initialLessons, online, timezone));
+  }, [initialLessons, online, timezone, userId]);
 
   useEffect(() => {
     if (!ready) return;
-    void cacheLessons(userId, initialLessons);
-    if (!online && initialLessons.length === 0) {
-      void getCachedLessons(userId).then((cached) => {
-        const today = getWorkspaceDateKey(new Date(), timezone);
-        setLessons(cached.filter((lesson) => getWorkspaceDateKey(lesson.startsAt, timezone) === today));
-      });
-    }
-  }, [initialLessons, online, ready, timezone, userId]);
+    void cacheLessons(userId, initialLessons).then(loadCachedLessons);
+  }, [initialLessons, loadCachedLessons, ready, userId]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const refresh = () => void loadCachedLessons();
+    window.addEventListener("teachnotes:sync", refresh);
+    return () => window.removeEventListener("teachnotes:sync", refresh);
+  }, [loadCachedLessons, ready]);
 
   async function updateLesson(lesson: Lesson, patch: Partial<Pick<Lesson, "status" | "notes" | "billingOverride">>) {
     if (!ready) return;
     const updated = await queueLessonPatch(userId, lesson, patch);
     setLessons((current) => current.map((item) => item.id === lesson.id ? updated : item));
     if (online) void syncNow();
+  }
+
+  async function saveNote(lesson: Lesson, notes: string) {
+    await updateLesson(lesson, { notes });
+    setNoteDrafts((current) => current[lesson.id] === notes ? Object.fromEntries(Object.entries(current).filter(([id]) => id !== lesson.id)) : current);
   }
 
   return (
@@ -68,7 +86,7 @@ export function TimezoneAwareTodayAgenda({ initialLessons, monthEarnings, comple
                   <div className="status-buttons" role="group" aria-label="Attendance status">
                     {statuses.map((status) => <button type="button" className={lesson.status === status ? "selected" : ""} key={status} onClick={() => void updateLesson(lesson, { status })}>{status === "attended" ? <Check /> : status === "no_show" ? <UserRoundX /> : <Clock3 />}{STATUS_LABELS[status]}</button>)}
                   </div>
-                  <label>Lesson note<textarea defaultValue={lesson.notes} onBlur={(event) => void updateLesson(lesson, { notes: event.target.value })} placeholder="What did you cover? What comes next?" /></label>
+                  <label>Lesson note<textarea value={noteDrafts[lesson.id] ?? lesson.notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [lesson.id]: event.target.value }))} onBlur={(event) => void saveNote(lesson, event.target.value)} placeholder="What did you cover? What comes next?" /></label>
                   <p className="autosave-note">Saved to this device immediately. Syncs when online.</p>
                 </div>}
               </div>

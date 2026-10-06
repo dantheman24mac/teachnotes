@@ -20,7 +20,7 @@ The demo runs in its own container without a Supabase URL, service key or route 
 - Email/password signup with server-side Supabase sessions and administrator approval.
 - Pending and rejected accounts remain isolated by application checks and database RLS.
 - Today agenda with quick attendance and note capture.
-- IndexedDB lesson cache, offline outbox, idempotent sync and visible conflict resolution.
+- IndexedDB lesson cache, offline outbox and automatic idempotent sync.
 - Student-specific fixed duration/price defaults and future-lesson updates.
 - Weekly and fortnightly recurring series, multiple weekdays, exclusions, open-ended rolling materialization and one/following/all-future rescheduling.
 - Consolidated and per-student monthly invoice previews, immutable invoice snapshots, private Excel workbooks with PDFs converted from those workbooks, void-and-regenerate behavior and double-billing protection.
@@ -88,9 +88,12 @@ flowchart LR
 - Server Components query Supabase directly; browser HTTP endpoints are reserved for delta sync, paginated history and private PDF downloads.
 - Authenticated pages and API responses are private and uncached. Approval is checked in the application and in RLS; a valid session alone does not grant tutor-data access. Static assets use Next.js immutable caching.
 - The service worker never caches authenticated HTML. It serves a user-neutral offline shell that hydrates only from the active account's namespaced IndexedDB, which is the authoritative device-side cache for lessons, conflicts and queued edits.
-- Lesson changes carry an operation UUID and base version. The PostgreSQL sync function locks each row, deduplicates retries and returns a conflict instead of overwriting another edit.
+- Lesson changes carry an operation UUID, base version and client save time. PostgreSQL locks each row and deduplicates retries. Notes, attendance and billing settings merge independently, with the latest save winning. If two saves have the same timestamp, the greater operation UUID wins.
+- Older app versions that do not send a client save time remain compatible. Their edits use server arrival order until the app refreshes.
 - Money is stored in integer cents and each lesson snapshots a fixed amount. Duration changes never prorate the amount automatically.
 - A partial unique database index prevents one lesson from appearing in two active finalized invoices.
+
+See [Workflow reliability handoff](docs/workflow-reliability.md) for the current behavior, migration order, validation commands and release limits.
 
 ## Security design
 

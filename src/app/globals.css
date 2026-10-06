@@ -183,6 +183,9 @@ h3 { margin-bottom: .3rem; }
 .note-timeline time { color: var(--muted); font-size: .7rem; }
 .note-timeline p { margin: 7px 0 0; color: #405b56; font-size: .83rem; line-height: 1.55; }
 .note-timeline.dense { max-height: 570px; overflow: auto; padding-right: 5px; }
+.history-load-more { margin-top: 2px; }
+.history-load-more:disabled { cursor: wait; opacity: .6; }
+.history-load-error { margin: 10px 0 0; color: var(--red); font-size: .76rem; }
 .contact-block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .contact-block span { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .8rem; }
 .empty-copy { color: var(--muted); }

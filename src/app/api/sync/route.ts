@@ -41,11 +41,14 @@ export async function POST(request: Request) {
   const parsed = z.object({ operations: z.array(operationSchema).max(100) }).safeParse(body);
   if (!parsed.success) return Response.json({ error: "Invalid sync payload", details: parsed.error.flatten() }, { status: 400 });
   if (!isSupabaseConfigured()) {
-    const applied = parsed.data.operations.map((operation) => {
-      const existing = demoLessons.find((lesson) => lesson.id === operation.lessonId)!;
-      return { operationId: operation.id, lesson: { ...existing, ...operation.patch, version: operation.baseVersion + 1, syncRevision: existing.syncRevision + 100 } };
+    const requestLessons = new Map(demoLessons.map((lesson) => [lesson.id, lesson]));
+    const applied = parsed.data.operations.map((operation, index) => {
+      const existing = requestLessons.get(operation.lessonId)!;
+      const updated = { ...existing, ...operation.patch, version: existing.version + 1, syncRevision: existing.syncRevision + 100 + index };
+      requestLessons.set(operation.lessonId, updated);
+      return { operationId: operation.id, lesson: updated };
     });
-    return Response.json({ applied, conflicts: [] });
+    return Response.json({ applied, conflicts: [] }, { headers: { "cache-control": "private, no-store", "x-teachnotes-demo": "true" } });
   }
   try {
     await requireApprovedUser();
@@ -57,7 +60,7 @@ export async function POST(request: Request) {
   const applied: Array<{ operationId: string; lesson: Lesson }> = [];
   const conflicts: Array<{ operation: SyncOperation; serverLesson: Lesson }> = [];
   for (const operation of parsed.data.operations) {
-    const { data, error } = await supabase.rpc("apply_lesson_operation", { p_operation_id: operation.id, p_lesson_id: operation.lessonId, p_base_version: operation.baseVersion, p_patch: { notes: operation.patch.notes, status: operation.patch.status, billing_override: operation.patch.billingOverride } });
+    const { data, error } = await supabase.rpc("apply_lesson_operation", { p_operation_id: operation.id, p_lesson_id: operation.lessonId, p_base_version: operation.baseVersion, p_patch: { notes: operation.patch.notes, status: operation.patch.status, billing_override: operation.patch.billingOverride }, p_client_timestamp: operation.clientTimestamp });
     if (error) return Response.json({ error: "Sync operation failed" }, { status: 500 });
     const result = data as { status: "applied" | "conflict"; lesson: Record<string, unknown> };
     const lesson = mapLesson(result.lesson);

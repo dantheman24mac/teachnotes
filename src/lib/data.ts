@@ -1,6 +1,8 @@
-import { endOfMonth, startOfMonth } from "date-fns";
 import { demoInvoices, demoLessons, demoSettings, demoStudents } from "./demo-data";
-import { calculateInvoiceTotal, isBillable } from "./domain";
+import {
+  calculateInvoiceTotal,
+  getInvoiceEligibleLessons,
+} from "./domain";
 import { expandSeries } from "./recurrence";
 import { requireApprovedUser } from "./auth";
 import { createClient, isSupabaseConfigured } from "./supabase/server";
@@ -41,20 +43,35 @@ function mapLesson(row: Record<string, unknown>): Lesson {
   };
 }
 
+const blankBusinessSettings: BusinessSettings = {
+  tutorName: "",
+  tutorEmail: "",
+  tutorPhone: "",
+  tutorAddress: "",
+  defaultPayerName: "",
+  defaultPayerEmail: "",
+  defaultPayerAddress: "",
+  paymentTermsDays: 7,
+  bankDetails: "",
+  invoicePrefix: "INV",
+  timezone: "Africa/Johannesburg",
+  currency: "ZAR",
+};
+
 function mapTutorSnapshot(value: unknown): BusinessSettings {
   const snapshot = (value && typeof value === "object" ? value : {}) as Partial<BusinessSettings>;
   return {
-    tutorName: String(snapshot.tutorName ?? demoSettings.tutorName),
-    tutorEmail: String(snapshot.tutorEmail ?? demoSettings.tutorEmail),
-    tutorPhone: String(snapshot.tutorPhone ?? demoSettings.tutorPhone),
-    tutorAddress: String(snapshot.tutorAddress ?? demoSettings.tutorAddress),
-    defaultPayerName: String(snapshot.defaultPayerName ?? demoSettings.defaultPayerName),
-    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? demoSettings.defaultPayerEmail),
-    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? demoSettings.defaultPayerAddress),
-    paymentTermsDays: Number(snapshot.paymentTermsDays ?? demoSettings.paymentTermsDays),
-    bankDetails: String(snapshot.bankDetails ?? demoSettings.bankDetails),
-    invoicePrefix: String(snapshot.invoicePrefix ?? demoSettings.invoicePrefix),
-    timezone: String(snapshot.timezone ?? demoSettings.timezone),
+    tutorName: String(snapshot.tutorName ?? blankBusinessSettings.tutorName),
+    tutorEmail: String(snapshot.tutorEmail ?? blankBusinessSettings.tutorEmail),
+    tutorPhone: String(snapshot.tutorPhone ?? blankBusinessSettings.tutorPhone),
+    tutorAddress: String(snapshot.tutorAddress ?? blankBusinessSettings.tutorAddress),
+    defaultPayerName: String(snapshot.defaultPayerName ?? blankBusinessSettings.defaultPayerName),
+    defaultPayerEmail: String(snapshot.defaultPayerEmail ?? blankBusinessSettings.defaultPayerEmail),
+    defaultPayerAddress: String(snapshot.defaultPayerAddress ?? blankBusinessSettings.defaultPayerAddress),
+    paymentTermsDays: Number(snapshot.paymentTermsDays ?? blankBusinessSettings.paymentTermsDays),
+    bankDetails: String(snapshot.bankDetails ?? blankBusinessSettings.bankDetails),
+    invoicePrefix: String(snapshot.invoicePrefix ?? blankBusinessSettings.invoicePrefix),
+    timezone: String(snapshot.timezone ?? blankBusinessSettings.timezone),
     currency: "ZAR",
   };
 }
@@ -171,6 +188,118 @@ export async function getLessons(options?: {
   return (data ?? []).map(mapLesson);
 }
 
+export interface LessonHistoryCursor {
+  startsAt: string;
+  id: string;
+}
+
+export interface LessonHistoryPage {
+  lessons: Lesson[];
+  nextCursor: string | null;
+}
+
+const lessonIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const lessonCursorTimestampPattern = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+const lessonHistoryCursorMaxLength = 256;
+
+export function encodeLessonHistoryCursor(cursor: LessonHistoryCursor) {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+export function decodeLessonHistoryCursor(value: string): LessonHistoryCursor | null {
+  if (value.length > lessonHistoryCursorMaxLength) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LessonHistoryCursor>;
+    if (typeof parsed.startsAt !== "string"
+      || !lessonCursorTimestampPattern.test(parsed.startsAt)
+      || Number.isNaN(Date.parse(parsed.startsAt))
+      || typeof parsed.id !== "string"
+      || !lessonIdPattern.test(parsed.id)) return null;
+    return { startsAt: parsed.startsAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+export async function getUpcomingLessons(studentId: string, from: string, limit = 5): Promise<Lesson[]> {
+  if (!isSupabaseConfigured()) {
+    return demoLessons
+      .filter((lesson) => lesson.studentId === studentId && lesson.startsAt >= from)
+      .sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
+      .slice(0, limit);
+  }
+  await requireApprovedUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("lessons")
+    .select("*, students(display_name)")
+    .eq("student_id", studentId)
+    .is("deleted_at", null)
+    .gte("starts_at", from)
+    .order("starts_at", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(mapLesson);
+}
+
+async function getPastLessonNotes(options: {
+  studentId: string;
+  before: LessonHistoryCursor | { startsAt: string };
+  limit: number;
+}): Promise<Lesson[]> {
+  if (!isSupabaseConfigured()) {
+    return demoLessons
+      .filter((lesson) => lesson.studentId === options.studentId && Boolean(lesson.notes))
+      .filter((lesson) => lesson.startsAt < options.before.startsAt
+        || ("id" in options.before && lesson.startsAt === options.before.startsAt && lesson.id < options.before.id))
+      .sort((left, right) => right.startsAt.localeCompare(left.startsAt) || right.id.localeCompare(left.id))
+      .slice(0, options.limit);
+  }
+  await requireApprovedUser();
+  const supabase = await createClient();
+  let query = supabase
+    .from("lessons")
+    .select("*, students(display_name)")
+    .eq("student_id", options.studentId)
+    .is("deleted_at", null)
+    .neq("notes", "")
+    .order("starts_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(options.limit);
+  if ("id" in options.before) {
+    query = query.or(`starts_at.lt.${options.before.startsAt},and(starts_at.eq.${options.before.startsAt},id.lt.${options.before.id})`);
+  } else {
+    query = query.lt("starts_at", options.before.startsAt);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map(mapLesson);
+}
+
+export async function getLessonHistoryPage(options: {
+  studentId: string;
+  before?: string;
+  cursor?: LessonHistoryCursor;
+  pageSize?: number;
+}): Promise<LessonHistoryPage> {
+  const pageSize = options.pageSize ?? 20;
+  const before = options.cursor ?? { startsAt: options.before ?? new Date().toISOString() };
+  const lessons = await getPastLessonNotes({ studentId: options.studentId, before, limit: pageSize + 1 });
+  const page = lessons.slice(0, pageSize);
+  const lastLesson = page.at(-1);
+  return {
+    lessons: page,
+    nextCursor: lessons.length > pageSize && lastLesson
+      ? encodeLessonHistoryCursor({ startsAt: lastLesson.startsAt, id: lastLesson.id })
+      : null,
+  };
+}
+
+export async function getPreviousLessonNotes(studentId: string, before: string, limit = 20) {
+  return getPastLessonNotes({ studentId, before: { startsAt: before }, limit });
+}
+
 export async function getLesson(id: string) {
   if (!isSupabaseConfigured()) return demoLessons.find((item) => item.id === id) ?? null;
   await requireApprovedUser();
@@ -189,8 +318,9 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
   if (!isSupabaseConfigured()) return demoSettings;
   const { user } = await requireApprovedUser();
   const supabase = await createClient();
-  const { data } = await supabase.from("business_settings").select("*").eq("owner_id", user.id).maybeSingle();
-  if (!data) return { ...demoSettings, tutorEmail: user.email ?? "" };
+  const { data, error } = await supabase.from("business_settings").select("*").eq("owner_id", user.id).maybeSingle();
+  if (error) throw error;
+  if (!data) return { ...blankBusinessSettings };
   return {
     tutorName: data.tutor_name ?? "",
     tutorEmail: data.tutor_email ?? user.email ?? "",
@@ -207,39 +337,28 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
   };
 }
 
-export async function getTodayDashboard() {
-  const now = new Date();
-  const dayStart = new Date(now);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-  const monthLessons = await getLessons({
-    from: startOfMonth(now).toISOString(),
-    to: endOfMonth(now).toISOString(),
-  });
-  return {
-    todayLessons: monthLessons.filter(
-      (lesson) => lesson.startsAt >= dayStart.toISOString() && lesson.startsAt < dayEnd.toISOString(),
-    ),
-    monthEarnings: calculateInvoiceTotal(monthLessons),
-    completedCount: monthLessons.filter((lesson) => lesson.status !== "scheduled").length,
-    billableCount: monthLessons.filter((lesson) =>
-      isBillable(lesson.status, lesson.billingOverride),
-    ).length,
-  };
-}
-
 export async function ensureSeriesHorizon() {
   if (!isSupabaseConfigured()) return;
-  const { user } = await requireApprovedUser();
+  await requireApprovedUser();
   const supabase = await createClient();
-  const { data: seriesRows } = await supabase.from("lesson_series").select("*, students(default_duration_minutes, default_rate_cents)").eq("active", true).is("deleted_at", null);
+  const { data: seriesRows, error: seriesError } = await supabase
+    .from("lesson_series")
+    .select("*")
+    .eq("active", true)
+    .is("deleted_at", null);
+  if (seriesError) throw seriesError;
   for (const series of seriesRows ?? []) {
     const horizon = new Date(); horizon.setFullYear(horizon.getFullYear() + 1);
-    const occurrences = expandSeries({ startsAtLocal: series.starts_at_local, timezone: series.timezone, frequency: series.frequency, weekdays: series.weekdays, until: series.until, exclusions: series.exclusions ?? [], horizon });
-    const student = series.students as { default_duration_minutes: number; default_rate_cents: number };
-    const rows = occurrences.map((date) => ({ owner_id: user.id, student_id: series.student_id, series_id: series.id, occurrence_key: date.toISOString(), starts_at: date.toISOString(), duration_minutes: student.default_duration_minutes, rate_cents: student.default_rate_cents }));
-    for (let offset = 0; offset < rows.length; offset += 500) await supabase.from("lessons").upsert(rows.slice(offset, offset + 500), { onConflict: "series_id,occurrence_key", ignoreDuplicates: true });
+    const materializeFrom = series.materialize_from ? new Date(series.materialize_from) : null;
+    const occurrences = expandSeries({ startsAtLocal: series.starts_at_local, timezone: series.timezone, frequency: series.frequency, weekdays: series.weekdays, weekStartsOn: series.week_starts_on, until: series.until, exclusions: series.exclusions ?? [], horizon })
+      .filter((date) => !materializeFrom || date >= materializeFrom)
+      .map((date) => date.toISOString());
+    const { error } = await supabase.rpc("materialize_lesson_series", {
+      p_series_id: series.id,
+      p_schedule_revision: series.schedule_revision,
+      p_occurrences: occurrences,
+    });
+    if (error) throw error;
   }
 }
 
@@ -276,8 +395,6 @@ export async function getInvoicePreview(
   const settings = settingsOverride ?? await getBusinessSettings();
   const period = getWorkspaceInvoicePeriod(month, settings.timezone);
   const lessons = await getLessons({ from: period.start.toISOString(), to: period.end.toISOString(), studentId });
-  const eligible = lessons.filter(
-    (lesson) => !lesson.invoiced && isBillable(lesson.status, lesson.billingOverride),
-  );
+  const eligible = getInvoiceEligibleLessons(lessons);
   return { lessons: eligible, totalCents: calculateInvoiceTotal(eligible), period, settings };
 }
