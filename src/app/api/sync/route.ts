@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AuthorizationError, requireApprovedUser } from "@/lib/auth";
 import { demoLessons, demoStudents } from "@/lib/demo-data";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import type { Lesson, SyncOperation } from "@/lib/types";
+import type { Lesson, SyncOperation, SyncRejection } from "@/lib/types";
 
 const operationSchema = z.object({
   id: z.string().uuid(),
@@ -11,6 +11,13 @@ const operationSchema = z.object({
   patch: z.object({ notes: z.string().max(20000).optional(), status: z.enum(["scheduled", "attended", "canceled_rescheduled", "no_show"]).optional(), billingOverride: z.enum(["default", "billable", "non_billable"]).optional() }).refine((value) => Object.keys(value).length > 0),
   clientTimestamp: z.string().datetime(),
 });
+
+function isLessonNotFound(error: { code: string; message: string }) {
+  // Matches the `raise exception 'lesson not found'` in
+  // public.apply_lesson_operation (see 202609070001_lesson_field_lww.sql),
+  // which PostgREST surfaces with code P0001.
+  return error.code === "P0001" && error.message === "lesson not found";
+}
 
 function mapLesson(row: Record<string, unknown>): Lesson {
   const student = row.students as { display_name?: string } | null;
@@ -48,7 +55,7 @@ export async function POST(request: Request) {
       requestLessons.set(operation.lessonId, updated);
       return { operationId: operation.id, lesson: updated };
     });
-    return Response.json({ applied, conflicts: [] }, { headers: { "cache-control": "private, no-store", "x-teachnotes-demo": "true" } });
+    return Response.json({ applied, conflicts: [], rejected: [] }, { headers: { "cache-control": "private, no-store", "x-teachnotes-demo": "true" } });
   }
   try {
     await requireApprovedUser();
@@ -59,12 +66,23 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const applied: Array<{ operationId: string; lesson: Lesson }> = [];
   const conflicts: Array<{ operation: SyncOperation; serverLesson: Lesson }> = [];
+  const rejected: SyncRejection[] = [];
   for (const operation of parsed.data.operations) {
     const { data, error } = await supabase.rpc("apply_lesson_operation", { p_operation_id: operation.id, p_lesson_id: operation.lessonId, p_base_version: operation.baseVersion, p_patch: { notes: operation.patch.notes, status: operation.patch.status, billing_override: operation.patch.billingOverride }, p_client_timestamp: operation.clientTimestamp });
-    if (error) return Response.json({ error: "Sync operation failed" }, { status: 500 });
+    if (error) {
+      // A lesson deleted on the server (for example by archiving its student)
+      // can never accept this operation. Report it as rejected so one dead
+      // operation cannot hold the rest of the outbox hostage. Any other
+      // failure still fails the batch so it retries intact.
+      if (isLessonNotFound(error)) {
+        rejected.push({ operationId: operation.id, lessonId: operation.lessonId, reason: "lesson_not_found" });
+        continue;
+      }
+      return Response.json({ error: "Sync operation failed" }, { status: 500 });
+    }
     const result = data as { status: "applied" | "conflict"; lesson: Record<string, unknown> };
     const lesson = mapLesson(result.lesson);
     if (result.status === "conflict") conflicts.push({ operation, serverLesson: lesson }); else applied.push({ operationId: operation.id, lesson });
   }
-  return Response.json({ applied, conflicts }, { headers: { "cache-control": "private, no-store" } });
+  return Response.json({ applied, conflicts, rejected }, { headers: { "cache-control": "private, no-store" } });
 }
