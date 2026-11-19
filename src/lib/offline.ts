@@ -1,7 +1,7 @@
 "use client";
 
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { Lesson, Student, SyncConflict, SyncOperation } from "./types";
+import type { Lesson, Student, SyncConflict, SyncOperation, SyncRejection } from "./types";
 
 interface TeachNotesDB extends DBSchema {
   lessons: { key: string; value: Lesson; indexes: { "by-start": string } };
@@ -194,9 +194,11 @@ export async function flushOutbox(userId: string) {
     const response = await fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operations }) });
     if (!response.ok) throw new Error("Sync is temporarily unavailable");
     const demoAcknowledgement = response.headers.get("x-teachnotes-demo") === "true";
-    const result = (await response.json()) as { applied: Array<{ operationId: string; lesson: Lesson }>; conflicts: SyncConflict[] };
+    const result = (await response.json()) as { applied: Array<{ operationId: string; lesson: Lesson }>; conflicts: SyncConflict[]; rejected?: SyncRejection[] };
+    const rejected = result.rejected ?? [];
     const completed = new Set(result.applied.map((item) => item.operationId));
     for (const conflict of result.conflicts) completed.add(conflict.operation.id);
+    for (const rejection of rejected) completed.add(rejection.operationId);
     if (completed.size !== operations.length || operations.some((operation) => !completed.has(operation.id))) {
       throw new Error("Sync response did not match requested operations");
     }
@@ -208,7 +210,18 @@ export async function flushOutbox(userId: string) {
       await tx.objectStore("outbox").put({ ...conflict.operation, id: crypto.randomUUID(), baseVersion: conflict.serverLesson.version });
       await tx.objectStore("conflicts").delete(conflict.operation.id);
     }
+    for (const rejection of rejected) await tx.objectStore("outbox").delete(rejection.operationId);
     const remaining = await tx.objectStore("outbox").getAll();
+    const remainingLessonIds = new Set(remaining.map((operation) => operation.lessonId));
+    for (const rejection of rejected) {
+      // The server no longer has this lesson, so drop its cached copy once no
+      // newer edit for it is still waiting. A surviving sibling stays visible
+      // until its own acknowledgement decides it.
+      if (!remainingLessonIds.has(rejection.lessonId)) {
+        await tx.objectStore("lessons").delete(rejection.lessonId);
+        await tx.objectStore("serverLessons").delete(rejection.lessonId);
+      }
+    }
     const serverLessons = new Map<string, Lesson>();
     for (const candidate of [...result.applied.map((item) => item.lesson), ...result.conflicts.map((conflict) => conflict.serverLesson)]) {
       const selected = serverLessons.get(candidate.id);

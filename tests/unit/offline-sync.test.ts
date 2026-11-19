@@ -258,6 +258,77 @@ describe("offline lesson sync", () => {
     expect(await getCachedLesson(user, initial.id)).toMatchObject({ status: "attended", notes: "Saved separately" });
   });
 
+  it("drops operations for lessons deleted on the server and purges their cached copies", async () => {
+    const user = userId();
+    const kept = lesson();
+    const gone = lesson();
+    await prepareOfflineUser(user, false);
+    await cacheLessons(user, [kept, gone]);
+    await queueLessonPatch(user, kept, { status: "attended" });
+    await queueLessonPatch(user, gone, { notes: "Will never land" });
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const operations = (JSON.parse(String(init?.body)) as { operations: SyncOperation[] }).operations;
+      const byLesson = new Map(operations.map((operation) => [operation.lessonId, operation]));
+      return Response.json({
+        applied: [{ operationId: byLesson.get(kept.id)!.id, lesson: { ...kept, status: "attended", version: 2, syncRevision: 2 } }],
+        conflicts: [],
+        rejected: [{ operationId: byLesson.get(gone.id)!.id, lessonId: gone.id, reason: "lesson_not_found" }],
+      });
+    }));
+
+    await flushOutbox(user);
+
+    expect(await pendingCount(user)).toBe(0);
+    expect(await getCachedLesson(user, kept.id)).toMatchObject({ status: "attended" });
+    expect(await getCachedLesson(user, gone.id)).toBeUndefined();
+    const db = await openDB(offlineDatabaseName(user));
+    expect(await db.get("serverLessons", gone.id)).toBeUndefined();
+    db.close();
+  });
+
+  it("keeps a deleted lesson visible while a newer edit for it is still pending", async () => {
+    const user = userId();
+    const initial = lesson();
+    await prepareOfflineUser(user, false);
+    await cacheLessons(user, [initial]);
+    await queueLessonPatch(user, initial, { status: "attended" });
+    let finishFirst!: (response: Response) => void;
+    let finishSecond!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { finishFirst = resolve; });
+    const secondResponse = new Promise<Response>((resolve) => { finishSecond = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(firstResponse).mockReturnValueOnce(secondResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const flushing = flushOutbox(user);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const optimistic = await queueLessonPatch(user, initial, { notes: "Typed during sync" });
+    const requested = (JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { operations: SyncOperation[] }).operations;
+    expect(requested).toHaveLength(1);
+    const db = await openDB(offlineDatabaseName(user));
+    const pending = (await db.getAll("outbox")) as SyncOperation[];
+    db.close();
+    const unsent = pending.find((operation) => operation.id !== requested[0].id)!;
+    finishFirst(Response.json({
+      applied: [],
+      conflicts: [],
+      rejected: [{ operationId: requested[0].id, lessonId: initial.id, reason: "lesson_not_found" }],
+    }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    expect(await getCachedLesson(user, initial.id)).toEqual(optimistic);
+    expect(await pendingCount(user)).toBe(1);
+
+    finishSecond(Response.json({
+      applied: [],
+      conflicts: [],
+      rejected: [{ operationId: unsent.id, lessonId: initial.id, reason: "lesson_not_found" }],
+    }));
+    await flushing;
+
+    expect(await pendingCount(user)).toBe(0);
+    expect(await getCachedLesson(user, initial.id)).toBeUndefined();
+  });
+
   it("retries legacy conflicts under a new operation ID and keeps their save time", async () => {
     const user = userId();
     const name = offlineDatabaseName(user);

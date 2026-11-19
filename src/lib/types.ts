@@ -119,3 +119,9 @@ export interface SyncConflict {
   operation: SyncOperation;
   serverLesson: Lesson;
 }
+
+export interface SyncRejection {
+  operationId: string;
+  lessonId: string;
+  reason: "lesson_not_found";
+}
